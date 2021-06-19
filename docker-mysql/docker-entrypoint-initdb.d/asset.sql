@@ -24,38 +24,34 @@ PRIMARY KEY (date)
 );
 
 CREATE TABLE exchange
-(id INTEGER AUTO_INCREMENT,
-date DATE NOT NULL,
+(date DATE NOT NULL,
 base_asset_name VARCHAR(32) NOT NULL,
 target_asset_name VARCHAR(32) NOT NULL,
 rate FLOAT NOT NULL,
 
-PRIMARY KEY (id),
-INDEX (id),
+PRIMARY KEY (date, base_asset_name, target_asset_name),
 
+FOREIGN KEY (date) REFERENCES date(date),
 FOREIGN KEY (base_asset_name)
     REFERENCES asset(asset_name)
     ON UPDATE CASCADE,
-
 FOREIGN KEY (target_asset_name)
     REFERENCES asset(asset_name)
     ON UPDATE CASCADE
 );
 
 CREATE TABLE history
-(id INTEGER AUTO_INCREMENT,
-date DATE NOT NULL,
+(date DATE NOT NULL,
 service_name VARCHAR(32) NOT NULL,
 asset_name VARCHAR(32) NOT NULL,
 amount FLOAT NOT NULL,
 
-PRIMARY KEY (id),
-INDEX (id),
+PRIMARY KEY (date, service_name, asset_name),
 
+FOREIGN KEY (date) REFERENCES date(date),
 FOREIGN KEY (service_name)
     REFERENCES service(service_name)
     ON UPDATE CASCADE,
-
 FOREIGN KEY (asset_name)
     REFERENCES asset(asset_name)
     ON UPDATE CASCADE
@@ -63,7 +59,7 @@ FOREIGN KEY (asset_name)
 
 -- User for batch process
 CREATE USER IF NOT EXISTS batch IDENTIFIED BY 'batch';
-GRANT SELECT, INSERT ON asset.* TO batch;
+GRANT SELECT, INSERT, UPDATE ON asset.* TO batch;
 
 -- User for analytics application
 CREATE USER IF NOT EXISTS app IDENTIFIED BY 'app';
