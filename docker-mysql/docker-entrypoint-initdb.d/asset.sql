@@ -28,7 +28,7 @@ CREATE TABLE exchange
 date DATE NOT NULL,
 base_asset_name VARCHAR(32) NOT NULL,
 target_asset_name VARCHAR(32) NOT NULL,
-rate DECIMAL NOT NULL,
+rate FLOAT NOT NULL,
 
 PRIMARY KEY (id),
 INDEX (id),
@@ -47,7 +47,7 @@ CREATE TABLE history
 date DATE NOT NULL,
 service_name VARCHAR(32) NOT NULL,
 asset_name VARCHAR(32) NOT NULL,
-amount DECIMAL NOT NULL,
+amount FLOAT NOT NULL,
 
 PRIMARY KEY (id),
 INDEX (id),
