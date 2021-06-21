@@ -5,62 +5,76 @@ CREATE DATABASE asset;
 use asset;
 
 CREATE TABLE service
-(service_name VARCHAR(32) NOT NULL,
+(
+    service_id INTEGER NOT NULL,
+    name VARCHAR(32) NOT NULL,
 
-PRIMARY KEY (service_name)
+    PRIMARY KEY (service_id)
 );
 
 CREATE TABLE asset
-(asset_name VARCHAR(32) NOT NULL,
+(
+    asset_id INTEGER NOT NULL,
+    name VARCHAR(32),
+    unit VARCHAR(16),
 
-PRIMARY KEY (asset_name)
+    PRIMARY KEY (asset_id)
 );
 
 CREATE TABLE date
 (
-date DATE NOT NULL,
+    date DATE NOT NULL,
 
-PRIMARY KEY (date)
+    PRIMARY KEY (date)
 );
 
 CREATE TABLE exchange
-(date DATE NOT NULL,
-base_asset_name VARCHAR(32) NOT NULL,
-target_asset_name VARCHAR(32) NOT NULL,
-rate FLOAT NOT NULL,
+(
+    exchange_id INTEGER NOT NULL,
+    date DATE NOT NULL,
+    base_asset_id INTEGER NOT NULL,
+    target_asset_id INTEGER NOT NULL,
+    rate FLOAT NOT NULL,
 
-PRIMARY KEY (date, base_asset_name, target_asset_name),
+    PRIMARY KEY (exchange_id),
 
-FOREIGN KEY (date) REFERENCES date(date),
-FOREIGN KEY (base_asset_name)
-    REFERENCES asset(asset_name)
-    ON UPDATE CASCADE,
-FOREIGN KEY (target_asset_name)
-    REFERENCES asset(asset_name)
-    ON UPDATE CASCADE
+    FOREIGN KEY (date) REFERENCES date(date),
+    FOREIGN KEY (base_asset_id) REFERENCES asset(asset_id) ON UPDATE CASCADE,
+    FOREIGN KEY (target_asset_id) REFERENCES asset(asset_id) ON UPDATE CASCADE
 );
 
 CREATE TABLE history
-(date DATE NOT NULL,
-service_name VARCHAR(32) NOT NULL,
-asset_name VARCHAR(32) NOT NULL,
-amount FLOAT NOT NULL,
+(
+    history_id INTEGER NOT NULL,
+    date DATE NOT NULL,
+    service_id INTEGER NOT NULL,
+    asset_id INTEGER NOT NULL,
+    amount FLOAT NOT NULL,
 
-PRIMARY KEY (date, service_name, asset_name),
+    PRIMARY KEY (history_id),
 
-FOREIGN KEY (date) REFERENCES date(date),
-FOREIGN KEY (service_name)
-    REFERENCES service(service_name)
-    ON UPDATE CASCADE,
-FOREIGN KEY (asset_name)
-    REFERENCES asset(asset_name)
-    ON UPDATE CASCADE
+    FOREIGN KEY (date) REFERENCES date(date),
+    FOREIGN KEY (service_id) REFERENCES service(service_id) ON UPDATE CASCADE,
+    FOREIGN KEY (asset_id) REFERENCES asset(asset_id) ON UPDATE CASCADE
 );
 
+CREATE TABLE next_id
+(
+    service_id INTEGER NOT NULL,
+    asset_id INTEGER NOT NULL,
+    exchange_id INTEGER NOT NULL,
+    history_id INTEGER NOT NULL
+);
+
+-- First ids
+INSERT INTO next_id VALUES (0, 0, 0, 0);
+
 -- User for batch process
-CREATE USER IF NOT EXISTS batch IDENTIFIED BY 'batch';
-GRANT SELECT, INSERT, UPDATE ON asset.* TO batch;
+DROP USER IF EXISTS asset_management_batch;
+CREATE USER IF NOT EXISTS asset_management_batch IDENTIFIED BY 'asset_management_batch';
+GRANT SELECT, INSERT, UPDATE ON asset.* TO asset_management_batch;
 
 -- User for analytics application
-CREATE USER IF NOT EXISTS app IDENTIFIED BY 'app';
-GRANT SELECT ON asset.* TO app;
+DROP USER IF EXISTS asset_management_app;
+CREATE USER IF NOT EXISTS asset_management_app IDENTIFIED BY 'asset_management_app';
+GRANT SELECT ON asset.* TO asset_management_app;
