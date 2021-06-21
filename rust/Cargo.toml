@@ -1,0 +1,9 @@
+[workspace]
+
+members = [
+    "common",
+    "database",
+    "batch_nicehash",
+    "batch_coincheck",
+    "server",
+]
