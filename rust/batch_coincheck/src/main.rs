@@ -1,5 +1,5 @@
 use apply::Apply;
-use common::alias::Result;
+use common::alias::{BoxErr, Result};
 use common::err::OkOpt;
 use common::http_query::HttpQuery;
 use common::settings::Settings;
@@ -73,6 +73,18 @@ fn call_private_api(
     Ok(json)
 }
 
+fn exchange_rate_between(base_unit: &str, target_unit: &str) -> Result<Amount> {
+    let path = format!("/api/rate/{}_{}", base_unit, target_unit);
+    let query = HttpQuery::empty();
+    let json = call_public_api(&path, &query)?;
+
+    match json["rate"].as_str().map(f64::from_str) {
+        Some(Ok(rate)) => Ok(Amount::new(rate)),
+        Some(Err(e)) => Err(e.into()),
+        None => Err(BoxErr::from(format!("Invalid json: {}", json.to_string()))),
+    }
+}
+
 fn main() -> Result<()> {
     println!("Coincheck batch started");
 
@@ -104,8 +116,16 @@ fn main() -> Result<()> {
         println!("{}", e);
     }
 
-    // Register jpy asset. This is necessary to record exchange rates
+    // Register asset. This is necessary to record exchange rates
     let jpy = asset_or_insert(&mut db_con, Some("Japanese Yen"), "JPY")?;
+    let usd = asset_or_insert(&mut db_con, Some("US Dollar"), "USD")?;
+    {
+        if let Err(e) =
+            exchange_rate_between(jpy.unit.as_deref().unwrap(), usd.unit.as_deref().unwrap())
+        {
+            println!("{}", e);
+        }
+    };
 
     // Total amount of each currency
     let mut asset_sums = HashMap::<&str, f64>::new();
@@ -136,8 +156,6 @@ fn main() -> Result<()> {
 
         let amount = Amount::new(amount);
 
-        println!("currency: {} balance: {}", asset_unit, amount.amount);
-
         // Register asset if necessary
         let asset_id = match asset_or_insert(&mut db_con, None, &asset_unit) {
             Ok(asset) => asset.id,
@@ -148,19 +166,16 @@ fn main() -> Result<()> {
         };
 
         // Insert exchange rate
-        let exchange_rate = {
-            let path = format!("/api/rate/{}_{}", asset_unit, jpy.unit.as_ref().unwrap());
-            let query = HttpQuery::empty();
-            let json = call_public_api(&path, &query)?;
-            match json["rate"].as_str().map(f64::from_str) {
-                Some(Ok(rate)) => Amount::new(rate),
-                _ => {
-                    println!("Invalid json: {}", json.to_string());
-                    continue;
-                }
-            }
-        };
-        db_con.insert_exchange(today, jpy.id, asset_id, exchange_rate)?;
+        // Because JPY is very cheap, get inverse exchange rate.
+        // This increases digit of the returned rate as json.
+        if let Err(e) = exchange_rate_between(&asset_unit, jpy.unit.as_deref().unwrap()).and_then(
+            |inverse_rate| {
+                let rate = Amount::new(1.0 / inverse_rate.amount);
+                db_con.insert_exchange(today, jpy.id, asset_id, rate)
+            },
+        ) {
+            println!("{}", e);
+        }
 
         // Add history
         if let Err(e) = db_con.insert_hisotry(service_id, asset_id, today, amount) {
