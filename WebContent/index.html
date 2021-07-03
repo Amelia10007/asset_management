@@ -14,12 +14,16 @@
             <th>Service</th>
             <th>Asset</th>
             <th>Balance</th>
+            <th>Rate to {{conversion.name}}</th>
+            <th>Conversion to {{conversion.name}}</th>
         </tr>
         {%- for asset in assets %}
         <tr>
             <td>{{asset.service}}</td>
             <td>{{asset.asset}}</td>
             <td align="right">{{asset.amount}} {{asset.unit}}</td>
+            <td align="right">1 {{asset.unit}} = {{asset.rate}} {{conversion.unit}}</td>
+            <td align="right">{{asset.conversion}} {{conversion.unit}}</td>
         </tr>
         {%- end for %}
     </table>

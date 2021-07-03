@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 common = { path="../common" }
 database = { path="../database" }
+apply= "*"
 hyper = { version="*", features=["full"] }
 templar = "0.4.2"
 tokio = { version="*", features=["full"] }
