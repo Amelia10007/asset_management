@@ -1,11 +1,5 @@
+use common::id_type;
 pub use mysql::time::Date;
-
-macro_rules! id_type {
-    ($t:tt) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        pub struct $t(pub(crate) i32);
-    };
-}
 
 id_type!(ServiceId);
 id_type!(AssetId);
