@@ -2,6 +2,7 @@ use apply::Apply;
 use common::alias::{BoxErr, Result};
 use common::err::OkOpt;
 use common::http_query::HttpQuery;
+use common::log::prelude::*;
 use common::settings::Settings;
 use database::entity::*;
 use database::AssetDatabase;
@@ -74,7 +75,7 @@ fn call_private_api(
 }
 
 fn exchange_rate_between(base_unit: &str, target_unit: &str) -> Result<Amount> {
-    let path = format!("/api/rate/{}_{}", base_unit, target_unit);
+    let path = format!("/api/rate/{}_{}", target_unit, base_unit);
     let query = HttpQuery::empty();
     let json = call_public_api(&path, &query)?;
 
@@ -85,11 +86,18 @@ fn exchange_rate_between(base_unit: &str, target_unit: &str) -> Result<Amount> {
     }
 }
 
-fn main() -> Result<()> {
-    println!("Coincheck batch started");
+fn main() {
+    let mut logger = Logger::new(std::io::stdout(), LogLevel::Debug);
+    if let Err(e) = batch(&mut logger) {
+        error!(logger, "{}", e);
+    }
+}
+
+fn batch(logger: &mut Logger<std::io::Stdout>) -> Result<()> {
+    info!(logger, "Coincheck batch started");
 
     let today = Date::today();
-    println!("date: {}", today);
+    info!(logger, "date: {}", today);
     // Load setting file
     let settings = env::args()
         .skip(1)
@@ -113,7 +121,7 @@ fn main() -> Result<()> {
 
     // Register today
     if let Err(e) = db_con.insert_date(today) {
-        println!("{}", e);
+        warn!(logger, "{}", e);
     }
 
     // Register asset. This is necessary to record exchange rates
@@ -123,7 +131,7 @@ fn main() -> Result<()> {
         if let Err(e) =
             exchange_rate_between(jpy.unit.as_deref().unwrap(), usd.unit.as_deref().unwrap())
         {
-            println!("{}", e);
+            warn!(logger, "{}", e);
         }
     };
 
@@ -160,7 +168,7 @@ fn main() -> Result<()> {
         let asset_id = match asset_or_insert(&mut db_con, None, &asset_unit) {
             Ok(asset) => asset.id,
             Err(e) => {
-                println!("{}", e);
+                warn!(logger, "{}", e);
                 continue;
             }
         };
@@ -168,23 +176,35 @@ fn main() -> Result<()> {
         // Insert exchange rate
         // Because JPY is very cheap, get inverse exchange rate.
         // This increases digit of the returned rate as json.
-        if let Err(e) = exchange_rate_between(&asset_unit, jpy.unit.as_deref().unwrap()).and_then(
+        match exchange_rate_between(&asset_unit, jpy.unit.as_deref().unwrap()).and_then(
             |inverse_rate| {
                 let rate = Amount::new(1.0 / inverse_rate.amount);
-                db_con.insert_exchange(today, jpy.id, asset_id, rate)
+                db_con
+                    .insert_exchange(today, jpy.id, asset_id, rate)
+                    .map(|_| rate)
             },
         ) {
-            println!("{}", e);
+            Ok(rate) => {
+                info!(
+                    logger,
+                    "Currency: {}, amount: {}, rate: {}{}",
+                    asset_unit,
+                    amount.amount,
+                    rate.amount,
+                    jpy.unit.as_ref().unwrap()
+                );
+            }
+            Err(e) => println!("{}", e),
         }
 
         // Add history
         if let Err(e) = db_con.insert_hisotry(service_id, asset_id, today, amount) {
-            println!("{}", e);
+            warn!(logger, "{}", e);
         }
     }
 
-    println!("Coincheck batch finished");
-    println!();
+    info!(logger, "Coincheck batch finished");
+    info!(logger, "");
 
     Ok(())
 }

@@ -2,6 +2,7 @@ use apply::Apply;
 use common::alias::Result;
 use common::err::OkOpt;
 use common::http_query::HttpQuery;
+use common::log::prelude::*;
 use common::settings::Settings;
 use database::entity::*;
 use database::AssetDatabase;
@@ -79,13 +80,20 @@ fn call_private_api(
     Ok(json)
 }
 
+fn main() {
+    let mut logger = Logger::new(std::io::stdout(), LogLevel::Debug);
+    if let Err(e) = batch(&mut logger) {
+        error!(logger, "{}", e);
+    }
+}
+
 /// Usage: batch_nicehash ***api-key-path***
-fn main() -> Result<()> {
-    println!("Nicehash batch started");
+fn batch(logger: &mut Logger<std::io::Stdout>) -> Result<()> {
+    info!(logger, "Nicehash batch started");
 
     let today = Date::today();
 
-    println!("date: {}", today);
+    info!(logger, "Date: {}", today);
 
     // Load setting file
     let settings = env::args()
@@ -110,7 +118,7 @@ fn main() -> Result<()> {
 
     // Register today's date
     if let Err(e) = db_con.insert_date(today) {
-        println!("{}", e);
+        warn!(logger, "{}", e);
     }
 
     // Register bitcoin asset. This is necessary to record exchange rates
@@ -126,9 +134,9 @@ fn main() -> Result<()> {
             c["totalBalance"].as_str().map(f64::from_str),
             c["btcRate"].as_f64(),
         ) {
-            println!(
-                "currency: {} balance: {}, rate: {}BTC",
-                asset_unit, balance, btc_rate
+            info!(
+                logger,
+                "currency: {} balance: {}, rate: {}BTC", asset_unit, balance, btc_rate
             );
 
             let amount = Amount::new(balance);
@@ -137,28 +145,28 @@ fn main() -> Result<()> {
             let asset_id = match asset_or_insert(&mut db_con, None, asset_unit) {
                 Ok(asset) => asset.id,
                 Err(e) => {
-                    println!("{}", e);
-                    continue;
+                    warn!(logger, "{}", e);
+                    continue;;
                 }
             };
 
             // Register exhange rate
             let rate = Amount::new(btc_rate);
             if let Err(e) = db_con.insert_exchange(today, bitcoin.id, asset_id, rate) {
-                println!("{}", e);
+                warn!(logger, "{}", e);
             }
 
-            // Appen history
+            // Append history
             if let Err(e) = db_con.insert_hisotry(service_id, asset_id, today, amount) {
-                println!("{}", e);
+                warn!(logger, "{}", e);
             }
         } else {
-            println!("Invalid json: {}", c);
+            warn!(logger, "Invalid json: {}", c);
         }
     }
 
-    println!("Nicehash batch finished");
-    println!();
+    info!(logger, "Nicehash batch finished");
+    info!(logger, "");
 
     Ok(())
 }
