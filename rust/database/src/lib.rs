@@ -260,6 +260,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_insert_service() {
         let mut conn = connect_asset_database_as_batch().unwrap();
 
@@ -279,6 +280,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_insert_asset() {
         let mut conn = connect_asset_database_as_batch().unwrap();
 
@@ -301,6 +303,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_insert_date() {
         let mut conn = connect_asset_database_as_batch().unwrap();
 
@@ -316,6 +319,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_insert_exchange() {
         let mut conn = connect_asset_database_as_batch().unwrap();
 
@@ -373,6 +377,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_insert_history() {
         let mut conn = connect_asset_database_as_batch().unwrap();
 
