@@ -10,7 +10,8 @@ pub mod prelude {
 macro_rules! log {
     ($logger:expr, $level:expr, $($arg:tt)*) => {
         {
-            let content = format_args!($($arg)*).to_string();
+            let mut content = format_args!($($arg)*).to_string();
+            content.push('\n');
             $logger.log($level, content)
         }
     };
@@ -179,7 +180,7 @@ mod tests {
 
         error!(logger, "Bob: {}", "oops");
 
-        assert_eq!("[Error] Bob: oops", dest.logs[0].as_str());
+        assert_eq!("[Error] Bob: oops\n", dest.logs[0].as_str());
     }
 
     #[test]
@@ -189,7 +190,7 @@ mod tests {
 
         warn!(logger, "Alice: {}", "oops");
 
-        assert_eq!("[Warn] Alice: oops", dest.logs[0].as_str());
+        assert_eq!("[Warn] Alice: oops\n", dest.logs[0].as_str());
     }
 
     #[test]
@@ -210,7 +211,7 @@ mod tests {
 
         info!(logger, "Alice: {}", "oops");
 
-        assert_eq!("[Info] Alice: oops", dest.logs[0].as_str());
+        assert_eq!("[Info] Alice: oops\n", dest.logs[0].as_str());
     }
 
     #[test]
@@ -220,7 +221,7 @@ mod tests {
 
         debug!(logger, "Alice: {}", "oops");
 
-        assert_eq!("[Debug] Alice: oops", dest.logs[0].as_str());
+        assert_eq!("[Debug] Alice: oops\n", dest.logs[0].as_str());
     }
 
     #[test]
@@ -235,8 +236,8 @@ mod tests {
         let mut grandchild = child.child();
         error!(grandchild, "grandchild");
 
-        assert_eq!("[Info] parent", dest.logs[0].as_str());
-        assert_eq!("  [Warn] child", dest.logs[1].as_str());
-        assert_eq!("    [Error] grandchild", dest.logs[2].as_str());
+        assert_eq!("[Info] parent\n", dest.logs[0].as_str());
+        assert_eq!("  [Warn] child\n", dest.logs[1].as_str());
+        assert_eq!("    [Error] grandchild\n", dest.logs[2].as_str());
     }
 }
