@@ -8,9 +8,11 @@ use trade;
 --
 --          2      1
 -- currency-----------market-----price
---  |                 |   |_______
---  |                 |           |
--- balance        orderbook    myorder
+--  |                 |   |_______   |____
+--  |                 |           |       |
+-- balance        orderbook    myorder    |
+--      |               |           |     |
+--      -----stamp-------------------------
 --
 -- next_id
 
@@ -23,14 +25,21 @@ CREATE TABLE currency
     name VARCHAR(32) NOT NULL
 );
 
+CREATE TABLE stamp
+(
+    stamp_id INTEGER NOT NULL PRIMARY KEY,
+    stamp TIMESTAMP NOT NULL
+);
+
 CREATE TABLE balance
 (
     balance_id INTEGER NOT NULL PRIMARY KEY,
     currency_id INTEGER NOT NULL,
-    stamp TIMESTAMP NOT NULL,
+    stamp_id INTEGER NOT NULL,
     balance FLOAT NOT NULL,
 
-    FOREIGN KEY (currency_id) REFERENCES currency(currency_id) ON UPDATE CASCADE
+    FOREIGN KEY (currency_id) REFERENCES currency(currency_id) ON UPDATE CASCADE,
+    FOREIGN KEY (stamp_id) REFERENCES stamp(stamp_id) ON UPDATE CASCADE
 );
 
 CREATE TABLE market
@@ -47,22 +56,24 @@ CREATE TABLE price
 (
     price_id INTEGER NOT NULL PRIMARY KEY,
     market_id INTEGER NOT NULL,
-    stamp TIMESTAMP NOT NULL,
+    stamp_id INTEGER NOT NULL,
     price FLOAT NOT NULL,
 
-    FOREIGN KEY (market_id) REFERENCES market(market_id) ON UPDATE CASCADE
+    FOREIGN KEY (market_id) REFERENCES market(market_id) ON UPDATE CASCADE,
+    FOREIGN KEY (stamp_id) REFERENCES stamp(stamp_id) ON UPDATE CASCADE
 );
 
 CREATE TABLE orderbook
 (
     orderbook_id INTEGER NOT NULL PRIMARY KEY,
     market_id INTEGER NOT NULL,
-    stamp TIMESTAMP NOT NULL,
+    stamp_id INTEGER NOT NULL,
     is_buy BOOLEAN NOT NULL,
     price FLOAT NOT NULL,
     volume FLOAT NOT NULL,
 
-    FOREIGN KEY (market_id) REFERENCES market(market_id) ON UPDATE CASCADE
+    FOREIGN KEY (market_id) REFERENCES market(market_id) ON UPDATE CASCADE,
+    FOREIGN KEY (stamp_id) REFERENCES stamp(stamp_id) ON UPDATE CASCADE
 );
 
 CREATE TABLE myorder
@@ -71,20 +82,22 @@ CREATE TABLE myorder
     -- order id on remote trading service
     transaction_id VARCHAR(64) NOT NULL,
     market_id INTEGER NOT NULL,
-    created TIMESTAMP NOT NULL,
-    modified TIMESTAMP NOT NULL,
+    created_stamp_id INTEGER NOT NULL,
+    modified_stamp_id INTEGER NOT NULL,
     price FLOAT NOT NULL,
     base_quantity FLOAT NOT NULL,
     quote_quantity FLOAT NOT NULL,
     state VARCHAR(32) NOT NULL,
 
-    FOREIGN KEY (market_id) REFERENCES market(market_id) ON UPDATE CASCADE
+    FOREIGN KEY (market_id) REFERENCES market(market_id) ON UPDATE CASCADE,
+    FOREIGN KEY (created_stamp_id) REFERENCES stamp(stamp_id) ON UPDATE CASCADE,
+    FOREIGN KEY (modified_stamp_id) REFERENCES stamp(stamp_id) ON UPDATE CASCADE
 );
 
 CREATE TABLE next_id
 (
-    dummy_id INTEGER NOT NULL,
     currency INTEGER NOT NULL,
+    stamp INTEGER NOT NULL,
     balance INTEGER NOT NULL,
     market INTEGER NOT NULL,
     price INTEGER NOT NULL,

@@ -1,12 +1,11 @@
-#[macro_use]
-extern crate diesel;
-
 use apply::Apply;
 use chrono::NaiveDateTime;
 use common::alias::Result;
 use common::err::OkOpt;
 use common::http_query::HttpQuery;
 use common::log::prelude::*;
+use database::logic::*;
+use database::model::*;
 use diesel::prelude::*;
 use json::JsonValue;
 use once_cell::sync::Lazy;
@@ -14,15 +13,19 @@ use std::env;
 use std::io::{stdout, Stdout};
 use std::str::FromStr;
 
-mod error;
-mod logic;
-mod model;
-mod schema;
-
-use logic::*;
-use model::*;
-
-static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| Logger::new(stdout(), LogLevel::Debug));
+static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
+    let level = match env::var("SCRAPER_LOGGER_LEVEL")
+        .map(|s| s.to_lowercase())
+        .as_deref()
+    {
+        Ok("error") => LogLevel::Error,
+        Ok("warn") => LogLevel::Warning,
+        Ok("info") => LogLevel::Info,
+        Ok("debug") => LogLevel::Debug,
+        _ => LogLevel::Debug,
+    };
+    Logger::new(stdout(), level)
+});
 
 fn call_public_api(api_path: &str, query_collection: &HttpQuery<&str, &str>) -> Result<JsonValue> {
     let url = format!("https://api2.nicehash.com{}", api_path);
@@ -231,16 +234,24 @@ fn connect_db() -> Result<MysqlConnection> {
 }
 
 fn main() {
-    let now = fetch_server_time().unwrap();
-    info!(LOGGER, "Nicehash scraper started at {}", now);
-
     // Load environment variables from file '.env' in currenct dir.
     dotenv::dotenv().ok();
+
+    let now = fetch_server_time().unwrap();
+    warn!(LOGGER, "Nicehash scraper started at {}", now);
 
     let conn = match connect_db() {
         Ok(conn) => conn,
         Err(e) => {
             error!(LOGGER, "Can't connect database: {}", e);
+            return;
+        }
+    };
+
+    let stamp = match add_stamp(&conn, now) {
+        Ok(stamp) => stamp,
+        Err(e) => {
+            error!(LOGGER, "Can't add timestamp to local DB: {}", e);
             return;
         }
     };
@@ -251,8 +262,10 @@ fn main() {
             for (symbol, name) in currencies.into_iter() {
                 match add_currency(&conn, symbol.clone(), name.clone()) {
                     Ok(_) => info!(LOGGER, "Add currency {}/{}", symbol, name),
-                    Err(error::Error::Db(e)) => warn!(LOGGER, "Can't add currency: {}", e),
-                    Err(error::Error::Logic(_)) => {}
+                    Err(database::error::Error::Db(e)) => {
+                        warn!(LOGGER, "Can't add currency: {}", e)
+                    }
+                    Err(database::error::Error::Logic(_)) => {}
                 }
             }
         }
@@ -278,9 +291,9 @@ fn main() {
             })
             .for_each(|(currency, balance)| {
                 // Add balance info to local DB
-                match add_balance(&conn, currency.currency_id, now, balance) {
+                match add_balance(&conn, currency.currency_id, stamp.stamp_id, balance) {
                     Ok(balance) => {
-                        info!(LOGGER, "Add balance: {}{}", balance.amount, currency.symbol)
+                        info!(LOGGER, "Add balance: {} {}", balance.amount, currency.symbol)
                     }
                     Err(e) => warn!(LOGGER, "Can't add balance: {}", e),
                 }
@@ -301,25 +314,41 @@ fn main() {
         }
     };
 
+    let local_markets = match list_markets(&conn) {
+        Ok(markets) => markets,
+        Err(e) => {
+            error!(LOGGER, "Can't load markets from local DB: {}", e);
+            return;
+        }
+    };
+
     markets
         .into_iter()
         // Add market info to local DB
         .filter_map(|(base, quote, price)| {
-            let base_currency = currency_collection.by_symbol(&base).unwrap();
-            let quote_currency = currency_collection.by_symbol(&quote).unwrap();
-            match search_or_add_market(&conn, base_currency.currency_id, quote_currency.currency_id)
+            let base = currency_collection.by_symbol(&base)?;
+            let quote = currency_collection.by_symbol(&quote)?;
+
+            let market = match local_markets
+                .by_base_quote_id(base.currency_id, quote.currency_id)
+                .cloned()
             {
-                Ok(market) => Some((market, price)),
-                Err(e) => {
-                    warn!(LOGGER, "Can't find or add market: {}", e);
-                    None
-                }
-            }
+                Some(market) => Some(market),
+                None => match add_market(&conn, base.currency_id, quote.currency_id) {
+                    Ok(market) => Some(market),
+                    Err(e) => {
+                        warn!(LOGGER, "Can't find or add market: {}", e);
+                        None
+                    }
+                },
+            }?;
+
+            Some((market, price))
         })
         // Add price info to local DB
         .for_each(|(market, price)| {
             let market_id = market.market_id;
-            match add_price(&conn, market_id, now, price) {
+            match add_price(&conn, market_id, stamp.stamp_id, price) {
                 Ok(price) => info!(LOGGER, "Add price: {}/{}", price.market_id, price.amount),
                 Err(e) => warn!(LOGGER, "Can't add price: {}", e),
             }
@@ -346,7 +375,7 @@ fn main() {
         };
         // Add orderbook info to local DB
         for (kind, price, volume) in orderbooks.into_iter() {
-            match add_orderbook(&conn, market.market_id, now, kind, price, volume) {
+            match add_orderbook(&conn, market.market_id, stamp.stamp_id, kind, price, volume) {
                 Ok(orderbook) => info!(LOGGER, "Add orderbook. id: {}", orderbook.orderbook_id),
                 Err(e) => warn!(LOGGER, "Can't add orderbook: {}", e),
             }
@@ -370,7 +399,7 @@ fn main() {
                 &conn,
                 transaction_id.clone(),
                 market.market_id,
-                now,
+                stamp.stamp_id,
                 price,
                 base_quantity,
                 quote_quantity,
@@ -383,5 +412,5 @@ fn main() {
     }
 
     let now = fetch_server_time().unwrap();
-    info!(LOGGER, "Nicehash scraper finished at {}", now);
+    warn!(LOGGER, "Nicehash scraper finished at {}", now);
 }

@@ -3,8 +3,6 @@
 members = [
     "common",
     "database",
-    "batch_nicehash",
-    "batch_coincheck",
     "server",
-    "nicehash_autotrade"
+    "nicehash_scraper",
 ]

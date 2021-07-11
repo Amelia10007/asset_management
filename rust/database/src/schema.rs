@@ -9,10 +9,18 @@ table! {
 }
 
 table! {
+    stamp (stamp_id) {
+        stamp_id -> Integer,
+        #[sql_name = "stamp"]
+        timestamp -> Timestamp,
+    }
+}
+
+table! {
     balance (balance_id) {
         balance_id -> Integer,
         currency_id -> Integer,
-        stamp -> Timestamp,
+        stamp_id -> Integer,
         #[sql_name = "balance"]
         amount -> Float,
     }
@@ -32,19 +40,20 @@ table! {
     price (price_id) {
         price_id -> Integer,
         market_id -> Integer,
-        stamp -> Timestamp,
+        stamp_id -> Integer,
         #[sql_name = "price"]
         amount -> Float,
     }
 }
 
 joinable!(price -> market(market_id));
+joinable!(price -> stamp(stamp_id));
 
 table! {
     orderbook (orderbook_id) {
         orderbook_id -> Integer,
         market_id -> Integer,
-        stamp -> Timestamp,
+        stamp_id -> Integer,
         is_buy -> Bool,
         price -> Float,
         volume -> Float,
@@ -52,14 +61,15 @@ table! {
 }
 
 joinable!(orderbook -> market(market_id));
+joinable!(orderbook -> stamp(stamp_id));
 
 table! {
     myorder (myorder_id) {
         myorder_id -> Integer,
         transaction_id -> VarChar,
         market_id -> Integer,
-        created -> Timestamp,
-        modified -> Timestamp,
+        created_stamp_id -> Integer,
+        modified_stamp_id -> Integer,
         price -> Float,
         base_quantity -> Float,
         quote_quantity -> Float,
@@ -70,9 +80,9 @@ table! {
 joinable!(myorder -> market(market_id));
 
 table! {
-    next_id (dummy_id) {
-        dummy_id -> Integer,
+    next_id (currency) {
         currency -> Integer,
+        stamp -> Integer,
         balance -> Integer,
         market -> Integer,
         price -> Integer,
