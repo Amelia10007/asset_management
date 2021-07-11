@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 use std::marker::PhantomData;
+use std::sync::{Arc, Mutex};
 
 pub mod prelude {
     pub use crate::log::{LogLevel, Logger};
@@ -95,32 +96,32 @@ impl LogLevel {
 }
 
 pub struct Logger<'a, W> {
-    dest: W,
+    dest: Arc<Mutex<W>>,
     minimum_log_level: LogLevel,
     indent: usize,
     _phantom: PhantomData<&'a ()>,
 }
 
 impl<'a, W> Logger<'a, W> {
-    pub const fn new(dest: W, minimum_log_level: LogLevel) -> Self {
+    pub fn new(dest: W, minimum_log_level: LogLevel) -> Self {
         Self {
-            dest,
+            dest: Arc::new(Mutex::new(dest)),
             minimum_log_level,
             indent: 0,
             _phantom: PhantomData,
         }
     }
 
-    pub fn child(&mut self) -> Logger<'_, &'_ mut W> {
+    pub fn child(&mut self) -> Logger<'_, W> {
         Logger {
-            dest: &mut self.dest,
+            dest: self.dest.clone(),
             minimum_log_level: self.minimum_log_level,
             indent: self.indent + 1,
             _phantom: PhantomData,
         }
     }
 
-    pub fn log<T>(&mut self, level: LogLevel, message: T) -> io::Result<()>
+    pub fn log<T>(&self, level: LogLevel, message: T) -> io::Result<()>
     where
         W: Write,
         T: std::fmt::Display,
@@ -130,7 +131,8 @@ impl<'a, W> Logger<'a, W> {
                 .take(self.indent * 2)
                 .collect::<String>();
             let content = format!("{}[{}] {}", indent, level.header(), message);
-            write!(self.dest, "{}", content)
+            let mut guard = self.dest.lock().unwrap();
+            write!(&mut *guard, "{}", content)
         } else {
             Ok(())
         }
