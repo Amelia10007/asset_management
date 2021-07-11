@@ -107,6 +107,10 @@ fn call_private_api(api_path: &str, query_collection: &HttpQuery<&str, &str>) ->
 }
 
 fn fetch_currencies() -> Result<Vec<(String, String)>> {
+    if let Ok("0") = env::var("FETCH_CURRENCY_FROM_REMOTE_SERVER").as_deref() {
+        return Ok(vec![]);
+    }
+
     let json = call_public_api("/main/api/v2/public/currencies", &HttpQuery::empty())?;
 
     json["currencies"]
@@ -172,6 +176,10 @@ fn fetch_market_prices<S: AsRef<str>>(symbols: &[S]) -> Result<Vec<(String, Stri
 }
 
 fn fetch_orderbooks<S: AsRef<str>>(base: S, quote: S) -> Result<Vec<(OrderKind, Amount, Amount)>> {
+    if let Ok("0") = env::var("FETCH_ORDERBOOK_FROM_REMOTE_SERVER").as_deref() {
+        return Ok(vec![]);
+    }
+
     let market = format!("{}{}", base.as_ref(), quote.as_ref());
     let limit = env::var("ORDERBOOK_FETCH_LIMIT_PER_MARKET")?;
     let query = [("market", market.as_str()), ("limit", limit.as_str())]
@@ -200,6 +208,10 @@ fn fetch_myorders<S: AsRef<str>>(
     base: S,
     quote: S,
 ) -> Result<Vec<(String, Amount, Amount, Amount, String)>> {
+    if let Ok("0") = env::var("FETCH_MYORDER_FROM_REMOTE_SERVER").as_deref() {
+        return Ok(vec![]);
+    }
+
     let market = format!("{}{}", base.as_ref(), quote.as_ref());
     let limit = env::var("MYORDER_FETCH_LIMIT_PER_MARKET")?;
     let query = [("market", market.as_str()), ("limit", limit.as_str())]
@@ -293,7 +305,10 @@ fn main() {
                 // Add balance info to local DB
                 match add_balance(&conn, currency.currency_id, stamp.stamp_id, balance) {
                     Ok(balance) => {
-                        info!(LOGGER, "Add balance: {} {}", balance.amount, currency.symbol)
+                        info!(
+                            LOGGER,
+                            "Add balance: {} {}", balance.amount, currency.symbol
+                        )
                     }
                     Err(e) => warn!(LOGGER, "Can't add balance: {}", e),
                 }
