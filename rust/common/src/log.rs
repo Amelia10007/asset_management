@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn test_error() {
         let mut dest = Dest::new();
-        let mut logger = Logger::new(&mut dest, LogLevel::Error);
+        let logger = Logger::new(&mut dest, LogLevel::Error);
 
         error!(logger, "Bob: {}", "oops");
 
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn test_warn() {
         let mut dest = Dest::new();
-        let mut logger = Logger::new(&mut dest, LogLevel::Warning);
+        let logger = Logger::new(&mut dest, LogLevel::Warning);
 
         warn!(logger, "Alice: {}", "oops");
 
@@ -199,7 +199,7 @@ mod tests {
     fn test_warn_sink() {
         let mut dest = Dest::new();
         // Logger for error level
-        let mut logger = Logger::new(&mut dest, LogLevel::Error);
+        let logger = Logger::new(&mut dest, LogLevel::Error);
 
         warn!(logger, "Alice: {}", "oops");
 
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn test_info() {
         let mut dest = Dest::new();
-        let mut logger = Logger::new(&mut dest, LogLevel::Info);
+        let logger = Logger::new(&mut dest, LogLevel::Info);
 
         info!(logger, "Alice: {}", "oops");
 
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn test_debug() {
         let mut dest = Dest::new();
-        let mut logger = Logger::new(&mut dest, LogLevel::Debug);
+        let logger = Logger::new(&mut dest, LogLevel::Debug);
 
         debug!(logger, "Alice: {}", "oops");
 
@@ -235,7 +235,7 @@ mod tests {
         let mut child = logger.child();
         warn!(child, "child");
 
-        let mut grandchild = child.child();
+        let grandchild = child.child();
         error!(grandchild, "grandchild");
 
         assert_eq!("[Info] parent\n", dest.logs[0].as_str());
