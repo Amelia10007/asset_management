@@ -1,23 +1,9 @@
+pub use crate::custom_sql_type::*;
 use crate::schema::*;
-use chrono::NaiveDateTime;
+pub use chrono::NaiveDateTime;
 
 pub type IdType = i32;
 pub type Amount = f32;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum OrderKind {
-    Buy,
-    Sell,
-}
-
-impl OrderKind {
-    pub const fn is_buy(self) -> bool {
-        match self {
-            OrderKind::Buy => true,
-            OrderKind::Sell => false,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Queryable, Insertable)]
 #[table_name = "currency"]
@@ -59,16 +45,24 @@ pub struct Balance {
     pub balance_id: IdType,
     pub currency_id: IdType,
     pub stamp_id: IdType,
-    pub amount: Amount,
+    pub available: Amount,
+    pub pending: Amount,
 }
 
 impl Balance {
-    pub fn new(balance_id: IdType, currency_id: IdType, stamp_id: IdType, amount: Amount) -> Self {
+    pub fn new(
+        balance_id: IdType,
+        currency_id: IdType,
+        stamp_id: IdType,
+        available: Amount,
+        pending: Amount,
+    ) -> Self {
         Self {
             balance_id,
             currency_id,
             stamp_id,
-            amount,
+            available,
+            pending,
         }
     }
 }
@@ -117,7 +111,7 @@ pub struct Orderbook {
     pub orderbook_id: IdType,
     pub market_id: IdType,
     pub stamp_id: IdType,
-    pub is_buy: bool,
+    pub order_kind: OrderKind,
     pub price: Amount,
     pub volume: Amount,
 }
@@ -133,5 +127,5 @@ pub struct MyOrder {
     pub price: Amount,
     pub base_quantity: Amount,
     pub quote_quantity: Amount,
-    pub state: String,
+    pub state: OrderState,
 }

@@ -21,8 +21,8 @@ table! {
         balance_id -> Integer,
         currency_id -> Integer,
         stamp_id -> Integer,
-        #[sql_name = "balance"]
-        amount -> Float,
+        available -> Float,
+        pending -> Float,
     }
 }
 
@@ -50,11 +50,14 @@ joinable!(price -> market(market_id));
 joinable!(price -> stamp(stamp_id));
 
 table! {
+    use diesel::sql_types::*;
+    use crate::custom_sql_type::*;
+
     orderbook (orderbook_id) {
         orderbook_id -> Integer,
         market_id -> Integer,
         stamp_id -> Integer,
-        is_buy -> Bool,
+        order_kind -> OrderKindMapping,
         price -> Float,
         volume -> Float,
     }
@@ -64,6 +67,9 @@ joinable!(orderbook -> market(market_id));
 joinable!(orderbook -> stamp(stamp_id));
 
 table! {
+    use diesel::sql_types::*;
+    use crate::custom_sql_type::*;
+
     myorder (myorder_id) {
         myorder_id -> Integer,
         transaction_id -> VarChar,
@@ -73,7 +79,7 @@ table! {
         price -> Float,
         base_quantity -> Float,
         quote_quantity -> Float,
-        state -> VarChar,
+        state -> OrderStateMapping,
     }
 }
 

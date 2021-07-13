@@ -116,11 +116,12 @@ pub fn add_balance(
     conn: &Conn,
     currency_id: IdType,
     stamp_id: IdType,
-    amount: Amount,
+    available: Amount,
+    pending: Amount,
 ) -> Result<Balance> {
     let balance_id = next_id::table.select(next_id::balance).first(conn)?;
 
-    let balance = Balance::new(balance_id, currency_id, stamp_id, amount);
+    let balance = Balance::new(balance_id, currency_id, stamp_id, available, pending);
 
     conn.transaction::<(), Error, _>(|| {
         // Update next id
@@ -224,13 +225,12 @@ pub fn add_orderbook(
     volume: Amount,
 ) -> Result<Orderbook> {
     let orderbook_id = next_id::table.select(next_id::orderbook).first(conn)?;
-    let is_buy = order_kind.is_buy();
 
     let orderbook = Orderbook {
         orderbook_id,
         market_id,
         stamp_id,
-        is_buy,
+        order_kind,
         price,
         volume,
     };
@@ -262,10 +262,11 @@ pub fn add_or_update_myorder(
     price: Amount,
     base_quantity: Amount,
     quote_quantity: Amount,
-    state: String,
+    state: OrderState,
 ) -> Result<()> {
     if let Ok(1) = myorder::table
         .filter(myorder::transaction_id.eq(&transaction_id))
+        .filter(myorder::state.ne(state))
         .apply(diesel::update)
         .set((
             myorder::modified_stamp_id.eq(now_stamp_id),

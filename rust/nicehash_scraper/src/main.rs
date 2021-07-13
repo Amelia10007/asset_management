@@ -132,7 +132,7 @@ fn fetch_currencies() -> Result<Vec<(String, String)>> {
         .apply(Ok)
 }
 
-fn fetch_balances() -> Result<Vec<(String, Amount)>> {
+fn fetch_balances() -> Result<Vec<(String, Amount, Amount)>> {
     let json = call_private_api("/main/api/v2/accounting/accounts2", &HttpQuery::empty())?;
 
     json["currencies"]
@@ -140,12 +140,16 @@ fn fetch_balances() -> Result<Vec<(String, Amount)>> {
         .filter(|j| j["active"].as_bool() == Some(true))
         .filter_map(|balance_json| {
             let symbol = balance_json["currency"].as_str()?;
-            let balance = match balance_json["totalBalance"].as_str().map(Amount::from_str) {
-                Some(Ok(balance)) => Some(balance),
-                _ => None,
-            }?;
+            let available = balance_json["available"]
+                .as_str()
+                .map(Amount::from_str)
+                .and_then(|x| x.ok())?;
+            let pending = balance_json["pending"]
+                .as_str()
+                .map(Amount::from_str)
+                .and_then(|x| x.ok())?;
 
-            Some((symbol.to_string(), balance))
+            Some((symbol.to_string(), available, pending))
         })
         .collect::<Vec<_>>()
         .apply(Ok)
@@ -245,6 +249,18 @@ fn connect_db() -> Result<MysqlConnection> {
     diesel::mysql::MysqlConnection::establish(&url).map_err(Into::into)
 }
 
+fn to_myorder_state<S: AsRef<str>>(s: S) -> Option<OrderState> {
+    match s.as_ref() {
+        "CREATED" | "PARTIAL" | "RESERVED" | "INSERTED" | "ENTERED" | "RELEASED"
+        | "CANCEL_REQUEST" => Some(OrderState::Opened),
+        "FULL" => Some(OrderState::Filled),
+        "CANCELLED" => Some(OrderState::Cancelled),
+        "RESERVATION_ERROR" | "INSERTED_ERROR" | "RELEASED_ERROR" | "PROCESSED_ERROR"
+        | "CANCELLED_ERROR" | "REJECTED" => Some(OrderState::Error),
+        _ => None,
+    }
+}
+
 fn main() {
     // Load environment variables from file '.env' in currenct dir.
     dotenv::dotenv().ok();
@@ -297,17 +313,26 @@ fn main() {
     match fetch_balances() {
         Ok(balances) => balances
             .into_iter()
-            .filter_map(|(symbol, balance)| {
+            .filter_map(|(symbol, available, pending)| {
                 let currency = currency_collection.by_symbol(&symbol)?;
-                Some((currency, balance))
+                Some((currency, available, pending))
             })
-            .for_each(|(currency, balance)| {
+            .for_each(|(currency, available, pending)| {
                 // Add balance info to local DB
-                match add_balance(&conn, currency.currency_id, stamp.stamp_id, balance) {
+                match add_balance(
+                    &conn,
+                    currency.currency_id,
+                    stamp.stamp_id,
+                    available,
+                    pending,
+                ) {
                     Ok(balance) => {
                         info!(
                             LOGGER,
-                            "Add balance: {} {}", balance.amount, currency.symbol
+                            "Add balance: {}/{} {}",
+                            balance.available,
+                            balance.pending,
+                            currency.symbol
                         )
                     }
                     Err(e) => warn!(LOGGER, "Can't add balance: {}", e),
@@ -410,6 +435,7 @@ fn main() {
         };
         // Add myorder info to local DB
         for (transaction_id, price, base_quantity, quote_quantity, state) in myorders.into_iter() {
+            let state = to_myorder_state(state).unwrap_or(OrderState::Error);
             match add_or_update_myorder(
                 &conn,
                 transaction_id.clone(),

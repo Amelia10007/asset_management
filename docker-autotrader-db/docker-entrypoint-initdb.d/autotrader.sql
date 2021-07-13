@@ -36,7 +36,8 @@ CREATE TABLE balance
     balance_id INTEGER NOT NULL PRIMARY KEY,
     currency_id INTEGER NOT NULL,
     stamp_id INTEGER NOT NULL,
-    balance FLOAT NOT NULL,
+    available FLOAT NOT NULL,
+    pending FLOAT NOT NULL,
 
     FOREIGN KEY (currency_id) REFERENCES currency(currency_id) ON UPDATE CASCADE,
     FOREIGN KEY (stamp_id) REFERENCES stamp(stamp_id) ON UPDATE CASCADE
@@ -68,7 +69,7 @@ CREATE TABLE orderbook
     orderbook_id INTEGER NOT NULL PRIMARY KEY,
     market_id INTEGER NOT NULL,
     stamp_id INTEGER NOT NULL,
-    is_buy BOOLEAN NOT NULL,
+    order_kind VARCHAR(4) NOT NULL,
     price FLOAT NOT NULL,
     volume FLOAT NOT NULL,
 
@@ -87,7 +88,7 @@ CREATE TABLE myorder
     price FLOAT NOT NULL,
     base_quantity FLOAT NOT NULL,
     quote_quantity FLOAT NOT NULL,
-    state VARCHAR(32) NOT NULL,
+    state VARCHAR(16) NOT NULL,
 
     FOREIGN KEY (market_id) REFERENCES market(market_id) ON UPDATE CASCADE,
     FOREIGN KEY (created_stamp_id) REFERENCES stamp(stamp_id) ON UPDATE CASCADE,
