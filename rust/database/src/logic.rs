@@ -264,17 +264,26 @@ pub fn add_or_update_myorder(
     quote_quantity: Amount,
     state: OrderState,
 ) -> Result<()> {
-    if let Ok(1) = myorder::table
+    let already_exists = myorder::table
         .filter(myorder::transaction_id.eq(&transaction_id))
-        .filter(myorder::state.ne(state))
-        .apply(diesel::update)
-        .set((
-            myorder::modified_stamp_id.eq(now_stamp_id),
-            myorder::state.eq(&state),
-        ))
-        .execute(conn)
-    {
-        return Ok(());
+        .apply(exists)
+        .apply(diesel::select)
+        .get_result(conn)?;
+
+    if already_exists {
+        // If order state changed, update order state.
+        // Otherwise, nothing executed.
+        return myorder::table
+            .filter(myorder::transaction_id.eq(&transaction_id))
+            .filter(myorder::state.ne(state))
+            .apply(diesel::update)
+            .set((
+                myorder::modified_stamp_id.eq(now_stamp_id),
+                myorder::state.eq(&state),
+            ))
+            .execute(conn)
+            .map(|_| ())
+            .map_err(Into::into);
     }
 
     let myorder_id = next_id::table.select(next_id::myorder).first(conn)?;
