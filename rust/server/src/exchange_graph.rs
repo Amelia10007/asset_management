@@ -14,17 +14,17 @@ impl<T> ExchangeGraph<T> {
         let mut rate_map = HashMap::new();
         let mut direct_relations = HashMap::new();
 
-        for (base, target, rate) in rates.into_iter() {
+        for (base, quote, rate) in rates.into_iter() {
             // Register relationships bi-directionally
-            rate_map.insert((base, target), rate);
-            rate_map.insert((target, base), 1.0 / rate);
+            rate_map.insert((base, quote), rate);
+            rate_map.insert((quote, base), 1.0 / rate);
 
             direct_relations
                 .entry(base)
-                .and_modify(|v: &mut Vec<_>| v.push(target))
-                .or_insert(vec![target]);
+                .and_modify(|v: &mut Vec<_>| v.push(quote))
+                .or_insert(vec![quote]);
             direct_relations
-                .entry(target)
+                .entry(quote)
                 .and_modify(|v| v.push(base))
                 .or_insert(vec![base]);
         }
@@ -35,18 +35,18 @@ impl<T> ExchangeGraph<T> {
         }
     }
 
-    pub fn rate_between(&mut self, base: T, target: T) -> Option<f64>
+    pub fn rate_between(&self, base: T, quote: T) -> Option<f64>
     where
         T: Copy + Eq + Hash,
     {
-        self.rate_between_inner(base, target, HashSet::new())
+        self.rate_between_inner(base, quote, &mut HashSet::new())
     }
 
-    fn rate_between_inner(&mut self, base: T, target: T, appeared_ids: HashSet<T>) -> Option<f64>
+    fn rate_between_inner(&self, base: T, quote: T, appeared_ids: &mut HashSet<T>) -> Option<f64>
     where
         T: Copy + Eq + Hash,
     {
-        if let Some(rate) = self.rate_inner(base, target) {
+        if let Some(rate) = self.rate_inner(base, quote) {
             return Some(rate);
         }
 
@@ -61,18 +61,9 @@ impl<T> ExchangeGraph<T> {
             .into_iter()
         {
             if let Some(&rate1) = self.rates.get(&(base, intermediate)) {
-                let mut appeared_ids = appeared_ids.clone();
                 appeared_ids.insert(intermediate);
-                if let Some(rate2) = self.rate_between_inner(intermediate, target, appeared_ids) {
-                    //
+                if let Some(rate2) = self.rate_between_inner(intermediate, quote, appeared_ids) {
                     let rate = rate1 * rate2;
-                    // Register search result for faster re-search
-                    self.rates.insert((base, target), rate);
-                    self.direct_relations
-                        .entry(base)
-                        .and_modify(|v| v.push(target))
-                        .or_insert(vec![target]);
-                    //
                     return Some(rate);
                 }
             }
@@ -81,13 +72,13 @@ impl<T> ExchangeGraph<T> {
         None
     }
 
-    fn rate_inner(&self, base: T, target: T) -> Option<f64>
+    fn rate_inner(&self, base: T, quote: T) -> Option<f64>
     where
         T: Copy + Eq + Hash,
     {
-        if base == target {
+        if base == quote {
             Some(1.0)
-        } else if let Some(&rate) = self.rates.get(&(base, target)) {
+        } else if let Some(&rate) = self.rates.get(&(base, quote)) {
             Some(rate)
         } else {
             None
@@ -103,7 +94,7 @@ mod tests {
     fn test_rate_between_neighbor() {
         let rates = vec![("a", "b", 10.0)];
 
-        let mut graph = ExchangeGraph::from_rates(rates);
+        let graph = ExchangeGraph::from_rates(rates);
 
         let forward_rate = graph.rate_between("a", "b");
         let backward_rate = graph.rate_between("b", "a");
@@ -116,7 +107,7 @@ mod tests {
     fn test_rate_between_neighbors() {
         let rates = vec![("a", "b", 10.0), ("a", "c", 2.0)];
 
-        let mut graph = ExchangeGraph::from_rates(rates);
+        let graph = ExchangeGraph::from_rates(rates);
 
         let forward_rate = graph.rate_between("a", "b");
         let backward_rate = graph.rate_between("b", "a");
@@ -133,14 +124,14 @@ mod tests {
     fn test_rate_between_equivalent() {
         let rates = vec![("a", "b", 10.0)];
 
-        let mut graph = ExchangeGraph::from_rates(rates);
+        let graph = ExchangeGraph::from_rates(rates);
 
         assert_eq!(Some(1.0), graph.rate_between("a", "a"));
     }
 
     #[test]
     fn test_rate_between_empty() {
-        let mut graph = ExchangeGraph::from_rates(std::iter::empty());
+        let graph = ExchangeGraph::from_rates(std::iter::empty());
 
         assert_eq!(None, graph.rate_between("a", "b"));
     }
@@ -149,7 +140,7 @@ mod tests {
     fn test_rate_between_bridge3() {
         let rates = vec![("a", "b", 10.0), ("b", "c", 2.0)]; // 1a=10b, 1b=2c
 
-        let mut graph = ExchangeGraph::from_rates(rates);
+        let graph = ExchangeGraph::from_rates(rates);
         let forward_rate = graph.rate_between("a", "c");
         let backward_rate = graph.rate_between("c", "a");
 
@@ -161,7 +152,7 @@ mod tests {
     fn test_rate_between_bridge3_with_inverse() {
         let rates = vec![("a", "b", 10.0), ("c", "b", 0.5)]; // 1a=10b, 1b=2c
 
-        let mut graph = ExchangeGraph::from_rates(rates);
+        let graph = ExchangeGraph::from_rates(rates);
         let forward_rate = graph.rate_between("a", "c");
         let backward_rate = graph.rate_between("c", "a");
 
@@ -173,7 +164,7 @@ mod tests {
     fn test_rate_between_bridge3_start_from_center() {
         let rates = vec![("b", "a", 0.1), ("b", "c", 2.0)]; // 1a=10b, 1b=2c
 
-        let mut graph = ExchangeGraph::from_rates(rates);
+        let graph = ExchangeGraph::from_rates(rates);
 
         let forward_rate = graph.rate_between("a", "c");
         let backward_rate = graph.rate_between("c", "a");
@@ -186,7 +177,7 @@ mod tests {
     fn test_rate_between_bridge4() {
         let rates = vec![("a", "b", 10.0), ("b", "c", 2.0), ("c", "d", 4.0)];
 
-        let mut graph = ExchangeGraph::from_rates(rates);
+        let graph = ExchangeGraph::from_rates(rates);
         let forward_rate = graph.rate_between("a", "d");
         let backward_rate = graph.rate_between("d", "a");
 
@@ -198,7 +189,7 @@ mod tests {
     fn test_rate_between_isolated_clusters() {
         let rates = vec![("a", "b", 10.0), ("b", "c", 2.0), ("foo", "bar", 4.0)];
 
-        let mut graph = ExchangeGraph::from_rates(rates);
+        let graph = ExchangeGraph::from_rates(rates);
 
         let rate = graph.rate_between("a", "foo");
 
