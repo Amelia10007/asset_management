@@ -27,6 +27,7 @@ table! {
 }
 
 joinable!(balance -> currency(currency_id));
+allow_tables_to_appear_in_same_query!(currency, balance);
 
 table! {
     market (market_id) {
@@ -47,7 +48,9 @@ table! {
 }
 
 joinable!(price -> market(market_id));
+allow_tables_to_appear_in_same_query!(market, price);
 joinable!(price -> stamp(stamp_id));
+allow_tables_to_appear_in_same_query!(stamp, price);
 
 table! {
     use diesel::sql_types::*;
@@ -64,7 +67,9 @@ table! {
 }
 
 joinable!(orderbook -> market(market_id));
+allow_tables_to_appear_in_same_query!(market, orderbook);
 joinable!(orderbook -> stamp(stamp_id));
+allow_tables_to_appear_in_same_query!(stamp, orderbook);
 
 table! {
     use diesel::sql_types::*;
@@ -84,6 +89,7 @@ table! {
 }
 
 joinable!(myorder -> market(market_id));
+allow_tables_to_appear_in_same_query!(market, myorder);
 
 table! {
     next_id (currency) {
