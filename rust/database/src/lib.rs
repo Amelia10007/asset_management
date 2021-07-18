@@ -1,5 +1,5 @@
 #[macro_use]
-extern crate diesel;
+pub extern crate diesel;
 
 pub mod custom_sql_type;
 pub mod error;
