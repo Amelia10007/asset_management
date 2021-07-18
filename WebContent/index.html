@@ -11,19 +11,23 @@
     <p>Your total assets on {{date}}</p>
     <table border="1">
         <tr>
-            <th>Service</th>
-            <th>Asset</th>
-            <th>Balance</th>
+            <th>Currency</th>
+            <th>Symbol</th>
+            <th>Available</th>
+            <th>Pending</th>
+            <th>Total Balance</th>
             <th>Rate to {{conversion.name}}</th>
             <th>Conversion to {{conversion.name}}</th>
         </tr>
-        {%- for asset in assets %}
+        {%- for balance in balances %}
         <tr>
-            <td>{{asset.service}}</td>
-            <td>{{asset.asset}}</td>
-            <td align="right">{{asset.amount}} {{asset.unit}}</td>
-            <td align="right">1 {{asset.unit}} = {{asset.rate}} {{conversion.unit}}</td>
-            <td align="right">{{asset.conversion}} {{conversion.unit}}</td>
+            <td>{{balance.name}}</td>
+            <td>{{balance.symbol}}</td>
+            <td align="right">{{balance.available}} {{balance.symbol}}</td>
+            <td align="right">{{balance.pending}} {{balance.symbol}}</td>
+            <td align="right">{{balance.total}} {{balance.symbol}}</td>
+            <td align="right">1 {{balance.symbol}} = {{balance.rate}} {{conversion.symbol}}</td>
+            <td align="right">{{balance.conversion}} {{conversion.symbol}}</td>
         </tr>
         {%- end for %}
     </table>

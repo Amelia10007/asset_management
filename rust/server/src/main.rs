@@ -1,12 +1,17 @@
 use apply::Apply;
 use common::alias::Result;
 use common::err::OkOpt;
-use database::entity::*;
-use database::AssetDatabase;
+use database::diesel::prelude::*;
+use database::diesel::{self, QueryDsl, RunQueryDsl};
+use database::logic::Conn;
+use database::model::{self, IdType};
+use database::schema;
 use exchange_graph::ExchangeGraph;
 use hyper::server::Server;
 use hyper::service::*;
 use hyper::{Body, Request, Response};
+use rayon::prelude::*;
+use std::env;
 use std::io::Read;
 use std::net::SocketAddr;
 use templar::*;
@@ -14,46 +19,82 @@ use templar::*;
 mod exchange_graph;
 
 async fn handle(req: Request<Body>) -> Result<Response<Body>> {
-    println!("{:?}", req);
-    println!();
-    let today = database::Date::today();
+    dotenv::dotenv().ok();
 
-    let mut conn = database::connect_asset_database_as_app()?;
-    let today_history = conn.histories_by_date(today)?;
-    let mut exchange_graph = construct_exchange_graph(&mut conn, today)?;
+    let conn = {
+        let url = env::var("DATABASE_URL")?;
+        Conn::establish(&url)?
+    };
 
-    let base_asset = conn.asset_by_unit("JPY")?.ok_opt("No base exchange data")?;
+    let latest_timestamp: model::Stamp = {
+        let id = schema::stamp::table
+            .select(diesel::dsl::max(schema::stamp::stamp_id))
+            .get_result::<Option<model::IdType>>(&conn)?
+            .ok_opt("No timestamp exists")?;
+
+        schema::stamp::table
+            .filter(schema::stamp::stamp_id.eq(id))
+            .first(&conn)?
+    };
+
+    let exchange_graph = construct_exchange_graph(&conn, latest_timestamp.stamp_id)?;
+
+    let base_currency: model::Currency = {
+        let base_symbol = req
+            .uri()
+            .query()
+            .unwrap_or_default()
+            .split('&')
+            .find_map(|split| {
+                let mut iter = split.split('=');
+                match (iter.next(), iter.next()) {
+                    (Some("fiat"), Some(base_symbol)) => Some(base_symbol),
+                    _ => None,
+                }
+            })
+            .unwrap_or("USDT");
+        schema::currency::table
+            .filter(schema::currency::symbol.eq(base_symbol))
+            .first(&conn)?
+    };
+
+    let balances = schema::balance::table
+        .inner_join(schema::currency::table)
+        .filter(schema::balance::stamp_id.eq(latest_timestamp.stamp_id))
+        .get_results::<(model::Balance, model::Currency)>(&conn)?;
 
     let mut data = Document::default();
-    data["title"] = "Asset Management".into();
-    data["date"] = today.to_string().into();
-    data["conversion"]["name"] = base_asset.name.as_deref().unwrap_or("???").into();
-    data["conversion"]["unit"] = base_asset.unit.as_deref().unwrap_or("???").into();
+    data["title"] = "Autotrader Dashboard".into();
+    data["date"] = latest_timestamp.timestamp.to_string().into();
+    data["conversion"]["name"] = base_currency.name.clone().into();
+    data["conversion"]["symbol"] = base_currency.symbol.clone().into();
 
-    data["assets"] = Document::Seq(
-        today_history
-            .iter()
-            .map(|h| {
-                let rate = exchange_graph.rate_between(base_asset.id, h.asset.id);
+    data["balances"] = Document::Seq(
+        balances
+            .into_par_iter()
+            .map(|(b, c)| {
+                let total_balance = b.available + b.pending;
+                let rate = exchange_graph.rate_between(b.currency_id, base_currency.currency_id);
                 let map = [
-                    ("service", h.service.name.clone()),
-                    ("asset", h.asset.name.clone().unwrap_or_default()),
-                    ("amount", h.amount.amount.to_string()),
-                    ("unit", h.asset.unit.clone().unwrap_or_default()),
+                    ("name", c.name.clone()),
+                    ("available", b.available.to_string()),
+                    ("pending", b.pending.to_string()),
+                    ("total", total_balance.to_string()),
+                    ("symbol", c.symbol.clone()),
                     (
                         "rate",
                         rate.map(|r| r.to_string()).unwrap_or(String::from("???")),
                     ),
                     (
                         "conversion",
-                        rate.map(|r| r * h.amount.amount)
+                        rate.map(|r| r * total_balance as f64)
                             .map(|amount| amount.to_string())
                             .unwrap_or(String::from("???")),
                     ),
                 ]
                 .iter()
                 .map(|(k, v)| (Document::from(*k), Document::from(v)))
-                .collect::<std::collections::BTreeMap<_, _>>();
+                .collect();
                 Document::Map(map)
             })
             .collect::<Vec<_>>(),
@@ -73,14 +114,17 @@ async fn handle(req: Request<Body>) -> Result<Response<Body>> {
     Ok(Response::new(Body::from(rendered)))
 }
 
-fn construct_exchange_graph<A: AssetDatabase>(
-    connection: &mut A,
-    date: Date,
-) -> Result<ExchangeGraph<AssetId>> {
-    connection
-        .exchanges_by_date(date)?
+fn construct_exchange_graph(conn: &Conn, timestamp_id: IdType) -> Result<ExchangeGraph<IdType>> {
+    use schema::*;
+
+    let prices = price::table
+        .inner_join(market::table.on(price::market_id.eq(market::market_id)))
+        .filter(price::stamp_id.eq(timestamp_id))
+        .load::<(model::Price, model::Market)>(conn)?;
+
+    prices
         .into_iter()
-        .map(|e| (e.base.id, e.target.id, e.rate.amount))
+        .map(|(p, m)| (m.base_id, m.quote_id, p.amount as f64))
         .apply(ExchangeGraph::from_rates)
         .apply(Ok)
 }
