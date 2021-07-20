@@ -3,6 +3,8 @@
 members = [
     "common",
     "database",
-    "server",
+    "speculator",
     "nicehash_scraper",
+    "nicehash_speculator",
+    "server",
 ]

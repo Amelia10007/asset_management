@@ -11,6 +11,10 @@ pushd ../rust/nicehash_scraper
 ../target/debug/nicehash_scraper >> ../../log/scraper.log
 popd
 
+pushd ../rust/nicehash_speculator
+../target/debug/nicehash_speculator >> ../../log/speculator.log
+popd
+
 finished=$(date)
 echo "scraping batch finished at ${finished}" >> ../log/log.log
 

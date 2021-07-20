@@ -1,0 +1,19 @@
+[package]
+name = "nicehash_speculator"
+version = "0.1.0"
+authors = ["Amelia10007 <nat.horn.mk0426@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+common = { path = "../common" }
+database = { path = "../database" }
+speculator = { path = "../speculator" }
+apply = "*"
+# libmysqlclient-dev is required
+diesel = { version = "1", features = ["mysql", "chrono"] }
+dotenv = "*"
+json = "*"
+once_cell = "*"
+reqwest = { version = "*", features = ["blocking"] }

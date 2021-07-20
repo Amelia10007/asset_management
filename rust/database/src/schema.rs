@@ -51,6 +51,7 @@ joinable!(price -> market(market_id));
 allow_tables_to_appear_in_same_query!(market, price);
 joinable!(price -> stamp(stamp_id));
 allow_tables_to_appear_in_same_query!(stamp, price);
+allow_tables_to_appear_in_same_query!(market, stamp);
 
 table! {
     use diesel::sql_types::*;
