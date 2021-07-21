@@ -344,6 +344,7 @@ fn main() {
     // Fetch market info from remote server
     let symbols = currency_collection
         .currencies()
+        .iter()
         .map(|c| &c.symbol)
         .collect::<Vec<_>>();
     let markets = match fetch_market_prices(&symbols) {

@@ -14,8 +14,8 @@ pub struct CurrencyCollection {
 }
 
 impl CurrencyCollection {
-    pub fn currencies(&self) -> impl Iterator<Item = &Currency> {
-        self.currencies.iter()
+    pub fn currencies(&self) -> &[Currency] {
+        self.currencies.as_slice()
     }
 
     pub fn by_id(&self, currency_id: IdType) -> Option<&Currency> {
@@ -35,8 +35,8 @@ pub struct MarketCollection {
 }
 
 impl MarketCollection {
-    pub fn markets(&self) -> impl Iterator<Item = &Market> {
-        self.markets.iter()
+    pub fn markets(&self) -> &[Market] {
+        self.markets.as_slice()
     }
 
     pub fn by_base_quote_id(
@@ -45,6 +45,7 @@ impl MarketCollection {
         quote_currency_id: IdType,
     ) -> Option<&Market> {
         self.markets()
+            .iter()
             .filter(|m| m.base_id == base_currency_id)
             .filter(|m| m.quote_id == quote_currency_id)
             .next()
