@@ -4,6 +4,7 @@ members = [
     "common",
     "database",
     "speculator",
+    "nicehash",
     "nicehash_scraper",
     "nicehash_speculator",
     "server",

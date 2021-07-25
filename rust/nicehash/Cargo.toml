@@ -1,5 +1,5 @@
 [package]
-name = "nicehash_scraper"
+name = "nicehash"
 version = "0.1.0"
 authors = ["Amelia10007 <nat.horn.mk0426@gmail.com>"]
 edition = "2018"
@@ -9,14 +9,8 @@ edition = "2018"
 [dependencies]
 common = { path = "../common" }
 database = { path = "../database" }
-nicehash = { path = "../nicehash" }
 apply = "*"
-chrono = "*"
-# libmysqlclient-dev is required
-diesel = { version = "1", features = ["mysql", "chrono"] }
-dotenv = "*"
 hmac-sha256 = "*"
 json = "*"
-once_cell = "*"
 reqwest = { version = "*", features = ["blocking"] }
 uuid = { version = "*", features = ["v4"] }
