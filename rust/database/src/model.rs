@@ -111,7 +111,7 @@ pub struct Orderbook {
     pub orderbook_id: IdType,
     pub market_id: IdType,
     pub stamp_id: IdType,
-    pub order_kind: OrderKind,
+    pub side: OrderSide,
     pub price: Amount,
     pub volume: Amount,
 }
@@ -127,5 +127,7 @@ pub struct MyOrder {
     pub price: Amount,
     pub base_quantity: Amount,
     pub quote_quantity: Amount,
+    pub order_type: OrderType,
+    pub side: OrderSide,
     pub state: OrderState,
 }

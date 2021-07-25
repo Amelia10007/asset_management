@@ -221,7 +221,7 @@ pub fn add_orderbook(
     conn: &Conn,
     market_id: IdType,
     stamp_id: IdType,
-    order_kind: OrderKind,
+    side: OrderSide,
     price: Amount,
     volume: Amount,
 ) -> Result<Orderbook> {
@@ -231,7 +231,7 @@ pub fn add_orderbook(
         orderbook_id,
         market_id,
         stamp_id,
-        order_kind,
+        side,
         price,
         volume,
     };
@@ -263,6 +263,8 @@ pub fn add_or_update_myorder(
     price: Amount,
     base_quantity: Amount,
     quote_quantity: Amount,
+    order_type: OrderType,
+    side: OrderSide,
     state: OrderState,
 ) -> Result<()> {
     let already_exists = myorder::table
@@ -298,6 +300,8 @@ pub fn add_or_update_myorder(
         price,
         base_quantity,
         quote_quantity,
+        order_type,
+        side,
         state,
     };
 

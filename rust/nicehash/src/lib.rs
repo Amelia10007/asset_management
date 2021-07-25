@@ -28,7 +28,7 @@ pub struct IncompleteMarketPrice {
 
 #[derive(Debug, Clone)]
 pub struct IncompleteOrderbook {
-    pub order_kind: OrderKind,
+    pub side: OrderSide,
     pub price: Amount,
     pub volume: Amount,
 }
@@ -39,6 +39,8 @@ pub struct IncompleteMyorder {
     pub price: Amount,
     pub base_quantity: Amount,
     pub quote_quantity: Amount,
+    pub order_type: OrderType,
+    pub side: OrderSide,
     pub state: OrderState,
 }
 
@@ -159,16 +161,16 @@ where
 
     json.members()
         .filter_map(|order_json| {
-            let order_kind = match order_json["dir"].as_str() {
-                Some("BUY") => Some(OrderKind::Buy),
-                Some("SELL") => Some(OrderKind::Sell),
+            let side = match order_json["dir"].as_str() {
+                Some("BUY") => Some(OrderSide::Buy),
+                Some("SELL") => Some(OrderSide::Sell),
                 _ => None,
             }?;
             let price = order_json["price"].as_f32()?;
             let volume = order_json["qty"].as_f32()?;
 
             let orderbook = IncompleteOrderbook {
-                order_kind,
+                side,
                 price,
                 volume,
             };
@@ -205,18 +207,17 @@ pub fn fetch_myorders<S: AsRef<str>>(
             let price = myorder_json["price"].as_f32()?;
             let base_quantity = myorder_json["origQty"].as_f32()?;
             let quote_quantity = myorder_json["origSndQty"].as_f32()?;
+            let order_type = myorder_json["type"].as_str().and_then(get_order_type)?;
+            let side = myorder_json["side"].as_str().and_then(get_order_side)?;
             let state = myorder_json["state"].as_str().and_then(get_myorder_state)?;
-            let order_kind = match myorder_json["side"].as_str() {
-                Some("BUY") => Some(OrderKind::Buy),
-                Some("SELL") => Some(OrderKind::Sell),
-                _ => None,
-            }?;
 
             let myorder = IncompleteMyorder {
                 transaction_id: transaction_id.to_string(),
                 price,
                 base_quantity,
                 quote_quantity,
+                order_type,
+                side,
                 state,
             };
             Some(myorder)
@@ -230,6 +231,24 @@ pub fn get_market_symbol<SB: AsRef<str>, SQ: AsRef<str>>(
     quote_symbol: SQ,
 ) -> String {
     format!("{}{}", base_symbol.as_ref(), quote_symbol.as_ref())
+}
+
+fn get_order_type<S: AsRef<str>>(s: S) -> Option<OrderType> {
+    match s.as_ref() {
+        "LIMIT" => Some(OrderType::Limit),
+        "MARKET" => Some(OrderType::Market),
+        "STOP_LIMIT" => Some(OrderType::StopLimit),
+        "STOP_MARKET" => Some(OrderType::StopMarket),
+        _ => None,
+    }
+}
+
+fn get_order_side<S: AsRef<str>>(s: S) -> Option<OrderSide> {
+    match s.as_ref() {
+        "BUY" => Some(OrderSide::Buy),
+        "SELL" => Some(OrderSide::Sell),
+        _ => None,
+    }
 }
 
 fn get_myorder_state<S: AsRef<str>>(s: S) -> Option<OrderState> {

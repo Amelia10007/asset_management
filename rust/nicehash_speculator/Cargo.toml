@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 common = { path = "../common" }
 database = { path = "../database" }
+nicehash = { path = "../nicehash" }
 speculator = { path = "../speculator" }
 apply = "*"
 # libmysqlclient-dev is required

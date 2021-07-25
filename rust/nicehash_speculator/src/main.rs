@@ -1,15 +1,13 @@
 use apply::Apply;
 use common::alias::Result;
 use common::err::OkOpt;
-use common::http_query::HttpQuery;
 use common::log::prelude::*;
 use database::logic::*;
 use database::model::*;
 use database::schema;
 use diesel::prelude::*;
-use json::JsonValue;
 use once_cell::sync::Lazy;
-use speculator::speculator::{MarketState, OrderRecommendation, Speculator};
+use speculator::speculator::{MarketState, MultipleRsiSpeculator, OrderRecommendation, Speculator};
 use std::collections::HashMap;
 use std::env;
 use std::io::{stdout, Stdout};
@@ -29,33 +27,24 @@ static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
     Logger::new(stdout(), level)
 });
 
-fn call_public_api(api_path: &str, query_collection: &HttpQuery<&str, &str>) -> Result<JsonValue> {
-    let url = format!("https://api2.nicehash.com{}", api_path);
-    let client = reqwest::blocking::ClientBuilder::default().build()?;
-
-    let req = client
-        .request(reqwest::Method::GET, url)
-        .query(query_collection.as_slice())
-        .build()?;
-
-    // Get reponse
-    let res = client.execute(req)?;
-    let res = res.text()?;
-
-    let json = json::parse(&res)?;
-
-    Ok(json)
-}
-
-fn fetch_server_time() -> Result<NaiveDateTime> {
-    let api_path = "/api/v2/time";
-    let query = HttpQuery::empty();
-    let json = call_public_api(api_path, &query)?;
-    let millis = json["serverTime"].as_u64().ok_opt("Invalid serverTime")?;
-    let secs = millis / 1000;
-    let nsecs = millis % 1000 * 1_000_000;
-    let time = NaiveDateTime::from_timestamp(secs as i64, nsecs as u32);
-    Ok(time)
+fn parse_market_symbols(
+    s: &str,
+    currency_collection: &CurrencyCollection,
+    market_collection: &MarketCollection,
+) -> Vec<(Currency, Currency, Market)> {
+    s.split(':')
+        .map(|symbol_pair| symbol_pair.split('-'))
+        .filter_map(|mut iter| match (iter.next(), iter.next()) {
+            (Some(base), Some(quote)) => Some((base, quote)),
+            _ => None,
+        })
+        .filter_map(|(base_symbol, quote_symbol)| {
+            let base = currency_collection.by_symbol(base_symbol)?;
+            let quote = currency_collection.by_symbol(quote_symbol)?;
+            let market = market_collection.by_base_quote_id(base.currency_id, quote.currency_id)?;
+            Some((base.clone(), quote.clone(), market.clone()))
+        })
+        .collect()
 }
 
 fn batch() -> Result<()> {
@@ -64,9 +53,23 @@ fn batch() -> Result<()> {
 
     let rsi_window_size = env::var("RSI_WINDOW_SIZE")?.apply(|s| usize::from_str(&s))?;
 
+    let currency_collection = list_currencies(&conn)?;
+    let market_collection = list_markets(&conn)?;
+
+    let speculator_target_markets = env::var("SPECULATOR_TARGET_MARKETS")?;
+    let speculator_target_markets = parse_market_symbols(
+        &speculator_target_markets,
+        &currency_collection,
+        &market_collection,
+    );
+    let target_market_ids = speculator_target_markets
+        .iter()
+        .map(|(_, _, market)| market.market_id)
+        .collect::<Vec<_>>();
+
     let oldest_stamp_in_rsi_window = schema::stamp::table
         .order(schema::stamp::stamp_id.desc())
-        .limit(rsi_window_size as i64 * 2)
+        .limit(12 * 4 * 20 * speculator_target_markets.len() as i64)
         .load::<Stamp>(&conn)?
         .last()
         .cloned()
@@ -77,18 +80,19 @@ fn batch() -> Result<()> {
             schema::market::table.on(schema::market::market_id.eq(schema::price::market_id)),
         )
         .inner_join(schema::stamp::table.on(schema::price::stamp_id.eq(schema::stamp::stamp_id)))
+        .filter(schema::market::market_id.eq_any(target_market_ids))
         .filter(schema::stamp::timestamp.ge(oldest_stamp_in_rsi_window.timestamp))
         .order(schema::stamp::stamp_id)
         .load::<(Price, Market, Stamp)>(&conn)?;
 
-    let mut speculators = HashMap::<IdType, Speculator>::new();
+    let mut speculators = HashMap::<IdType, MultipleRsiSpeculator>::new();
 
-    info!(LOGGER, "Speculation source record count: {}", records.len());
+    debug!(LOGGER, "Speculation source record count: {}", records.len());
 
     for (price, market, stamp) in records.into_iter() {
         let speculator = speculators
             .entry(market.market_id)
-            .or_insert(Speculator::new(market, rsi_window_size));
+            .or_insert(MultipleRsiSpeculator::new(market, rsi_window_size));
 
         let market_state = MarketState {
             stamp,
@@ -101,45 +105,27 @@ fn batch() -> Result<()> {
         speculator.update_market_state(market_state);
     }
 
-    let currencies = schema::currency::table.load::<Currency>(&conn)?;
-
     for speculator in speculators.values() {
-        let market = speculator.market();
-        let base_currency = currencies
-            .iter()
-            .find(|c| c.currency_id == market.base_id)
-            .ok_opt("Currency does not exist")?;
-        let quote_currency = currencies
-            .iter()
-            .find(|c| c.currency_id == market.quote_id)
-            .ok_opt("Currency does not exist")?;
-        let market_symbol = format!("{}-{}", base_currency.symbol, quote_currency.symbol);
         let recommendations = speculator.recommend();
 
-        info!(LOGGER, "Recommendation count: {}", recommendations.len());
+        debug!(
+            LOGGER,
+            "Recommendation count in market {}: {}",
+            speculator.market().market_id,
+            recommendations.len()
+        );
 
-        for (recommend, reason) in recommendations {
-            let mut message = match recommend {
-                OrderRecommendation::Open { order_kind, .. } => {
-                    format!("Recommend to {:?} in {}", order_kind, market_symbol)
+        for recommend in recommendations.into_iter() {
+            match recommend {
+                OrderRecommendation::Open(order, description) => {
+                    info!(LOGGER, "{}: {:?}", description.reason(), order)
                 }
-                OrderRecommendation::Cancel(order) => format!(
-                    "Recommend to cancel order {} in {}",
-                    order.transaction_id, market_symbol
-                ),
-            };
-            message.push(' ');
-            message.push_str(&reason);
-
-            notify_recommendation(&message)?;
+                OrderRecommendation::Cancel(order, description) => {
+                    info!(LOGGER, "{}: {}", description.reason(), order.transaction_id)
+                }
+            }
         }
     }
-
-    Ok(())
-}
-
-fn notify_recommendation(s: &str) -> Result<()> {
-    warn!(LOGGER, "{}", s);
 
     Ok(())
 }
@@ -147,18 +133,18 @@ fn notify_recommendation(s: &str) -> Result<()> {
 fn main() {
     dotenv::dotenv().ok();
 
-    let now = fetch_server_time().unwrap();
-    warn!(LOGGER, "Nicehash speculator started at {}", now);
-
-    // Load environment variables from file '.env' in currenct dir.
-    if let Err(e) = dotenv::dotenv() {
-        error!(LOGGER, "{}", e);
-    }
+    let now = match nicehash::api_common::fetch_server_time() {
+        Ok(now) => now,
+        Err(e) => {
+            error!(LOGGER, "Can't fetch nicehash server time: {}", e);
+            return;
+        }
+    };
+    info!(LOGGER, "Nicehash speculator started at {}", now);
 
     if let Err(e) = batch() {
         error!(LOGGER, "{}", e);
     }
 
-    let now = fetch_server_time().unwrap();
-    warn!(LOGGER, "Nicehash speculator finished at {}", now);
+    info!(LOGGER, "Nicehash speculator finished");
 }

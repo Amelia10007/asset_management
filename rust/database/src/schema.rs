@@ -61,7 +61,7 @@ table! {
         orderbook_id -> Integer,
         market_id -> Integer,
         stamp_id -> Integer,
-        order_kind -> OrderKindMapping,
+        side -> OrderSideMapping,
         price -> Float,
         volume -> Float,
     }
@@ -85,6 +85,8 @@ table! {
         price -> Float,
         base_quantity -> Float,
         quote_quantity -> Float,
+        order_type -> OrderTypeMapping,
+        side -> OrderSideMapping,
         state -> OrderStateMapping,
     }
 }

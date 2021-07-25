@@ -1,5 +1,4 @@
 use database::model::NaiveDateTime;
-use itertools::Itertools;
 use std::collections::VecDeque;
 
 pub type Duration = <NaiveDateTime as std::ops::Sub>::Output;
@@ -17,6 +16,17 @@ impl PriceChange {
         } else {
             PriceChange::Decrease(-change)
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Rsi {
+    rsi: f64,
+}
+
+impl Rsi {
+    pub fn percent(&self) -> f64 {
+        self.rsi * 100.0
     }
 }
 
@@ -48,9 +58,20 @@ impl RsiSequence {
         }
     }
 
-    pub fn rsi_sequence(&self) -> Option<Vec<f64>> {
+    pub fn rsi_sequence(&self) -> Option<Vec<Rsi>> {
         if self.rsis.len() >= self.window_size {
-            self.rsis.iter().copied().collect::<Option<Vec<f64>>>()
+            self.rsis
+                .iter()
+                .map(|r| r.map(|rsi| Rsi { rsi }))
+                .collect::<Option<_>>()
+        } else {
+            None
+        }
+    }
+
+    pub fn rsi_sequence_opt(&self) -> Option<Vec<Option<Rsi>>> {
+        if self.rsis.len() >= self.window_size {
+            Some(self.rsis.iter().map(|r| r.map(|rsi| Rsi { rsi })).collect())
         } else {
             None
         }
@@ -154,8 +175,12 @@ impl TimespanRsiSequence {
         }
     }
 
-    pub fn rsi_sequence(&self) -> Option<Vec<f64>> {
+    pub fn rsi_sequence(&self) -> Option<Vec<Rsi>> {
         self.rsi_sequence.rsi_sequence()
+    }
+
+    pub fn rsi_sequence_opt(&self) -> Option<Vec<Option<Rsi>>> {
+        self.rsi_sequence.rsi_sequence_opt()
     }
 }
 
@@ -201,56 +226,5 @@ mod tests {
         rsi_sequence.update_price(10.); // -10
         let rsi = (20. + 20.) / (20. + 10. + 20. + 20. + 10.);
         assert_eq!(Some(rsi), rsi_sequence.currenct_rsi());
-    }
-}
-
-/// The Relative Strenth Index
-#[derive(Debug, Clone)]
-pub struct Rsi {
-    window_size: usize,
-    prices: VecDeque<f64>,
-}
-
-impl Rsi {
-    pub fn with_window_size(window_size: usize) -> Self {
-        assert!(window_size > 0);
-
-        Self {
-            window_size,
-            prices: VecDeque::with_capacity(window_size),
-        }
-    }
-
-    pub fn rsi_percent(&self) -> Option<f64> {
-        if self.prices.len() < self.window_size {
-            None
-        } else {
-            let (increase, decrease) = self.prices.iter().tuple_windows().fold(
-                (0., 0.),
-                |(acc_inc, acc_dec), (prev, next)| {
-                    let diff = next - prev;
-                    if diff > 0. {
-                        (acc_inc + diff, acc_dec)
-                    } else {
-                        (acc_inc, acc_dec - diff)
-                    }
-                },
-            );
-
-            let index = increase / (increase + decrease);
-            Some(index)
-        }
-    }
-
-    pub fn update_price(&mut self, price: f64) -> Option<f64> {
-        let popped_price = if self.prices.len() >= self.window_size {
-            self.prices.pop_front()
-        } else {
-            None
-        };
-
-        self.prices.push_back(price);
-
-        popped_price
     }
 }

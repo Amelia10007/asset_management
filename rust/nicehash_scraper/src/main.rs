@@ -251,7 +251,7 @@ fn main() {
                                         &conn,
                                         market.market_id,
                                         stamp.stamp_id,
-                                        orderbook.order_kind,
+                                        orderbook.side,
                                         orderbook.price,
                                         orderbook.volume,
                                     ) {
@@ -299,6 +299,8 @@ fn main() {
                                         myorder.price,
                                         myorder.base_quantity,
                                         myorder.quote_quantity,
+                                        myorder.order_type,
+                                        myorder.side,
                                         myorder.state,
                                     ) {
                                         Ok(_) => debug!(

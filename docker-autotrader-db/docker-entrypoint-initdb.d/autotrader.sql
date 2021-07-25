@@ -69,7 +69,7 @@ CREATE TABLE orderbook
     orderbook_id INTEGER NOT NULL PRIMARY KEY,
     market_id INTEGER NOT NULL,
     stamp_id INTEGER NOT NULL,
-    order_kind VARCHAR(4) NOT NULL,
+    side VARCHAR(4) NOT NULL,
     price FLOAT NOT NULL,
     volume FLOAT NOT NULL,
 
@@ -88,6 +88,8 @@ CREATE TABLE myorder
     price FLOAT NOT NULL,
     base_quantity FLOAT NOT NULL,
     quote_quantity FLOAT NOT NULL,
+    order_type VARCHAR(16) NOT NULL,
+    side VARCHAR(4) NOT NULL,
     state VARCHAR(16) NOT NULL,
 
     FOREIGN KEY (market_id) REFERENCES market(market_id) ON UPDATE CASCADE,
