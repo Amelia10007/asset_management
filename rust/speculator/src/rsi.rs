@@ -132,24 +132,24 @@ impl RsiSequence {
 
 #[derive(Debug, Clone)]
 pub struct TimespanRsiSequence {
-    duration_chunk: Duration,
+    timespan: Duration,
     rsi_sequence: RsiSequence,
     buffer: Vec<f64>,
     last_rsi_timestamp: Option<NaiveDateTime>,
 }
 
 impl TimespanRsiSequence {
-    pub fn new(duration_chunk: Duration, window_size: usize) -> Self {
+    pub fn new(timespan: Duration, window_size: usize) -> Self {
         Self {
-            duration_chunk,
+            timespan,
             rsi_sequence: RsiSequence::with_window_size(window_size),
             buffer: vec![],
             last_rsi_timestamp: None,
         }
     }
 
-    pub fn duration_chunk(&self) -> Duration {
-        self.duration_chunk
+    pub fn timespan(&self) -> Duration {
+        self.timespan
     }
 
     pub fn window_size(&self) -> usize {
@@ -160,7 +160,7 @@ impl TimespanRsiSequence {
         self.buffer.push(price);
 
         let buffer_filled = match self.last_rsi_timestamp.as_ref().copied() {
-            Some(last) => (timestamp - last) >= self.duration_chunk,
+            Some(last) => (timestamp - last) >= self.timespan,
             None => {
                 self.last_rsi_timestamp = Some(timestamp);
                 false

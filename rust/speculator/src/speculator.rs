@@ -1,6 +1,5 @@
 use crate::rsi::{Duration, TimespanRsiSequence};
 use database::model::*;
-use std::iter::once;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IncompoleteMyOrder {
@@ -84,19 +83,23 @@ pub trait Speculator {
 pub struct MultipleRsiSpeculator {
     market: Market,
     market_states: Vec<MarketState>,
-    rsi_sequence_15m: TimespanRsiSequence,
-    rsi_sequence_1h: TimespanRsiSequence,
-    rsi_sequence_4h: TimespanRsiSequence,
+    // RSI ordered by timespan descending
+    rsi_sequences: Vec<TimespanRsiSequence>,
 }
 
 impl MultipleRsiSpeculator {
-    pub fn new(market: Market, rsi_window_size: usize) -> Self {
+    pub fn new(market: Market, rsi_window_size: usize, mut rsi_timespans: Vec<Duration>) -> Self {
+        rsi_timespans.sort();
+
+        let rsi_sequences = rsi_timespans
+            .into_iter()
+            .map(|span| TimespanRsiSequence::new(span, rsi_window_size))
+            .collect();
+
         Self {
             market,
             market_states: vec![],
-            rsi_sequence_15m: TimespanRsiSequence::new(Duration::minutes(15), rsi_window_size),
-            rsi_sequence_1h: TimespanRsiSequence::new(Duration::hours(1), rsi_window_size),
-            rsi_sequence_4h: TimespanRsiSequence::new(Duration::hours(4), rsi_window_size),
+            rsi_sequences,
         }
     }
 }
@@ -109,19 +112,16 @@ impl Speculator for MultipleRsiSpeculator {
     fn update_market_state(&mut self, new_market_state: MarketState) {
         let timestamp = new_market_state.stamp.timestamp;
         let new_price = new_market_state.price.amount as f64;
-        self.rsi_sequence_15m.update_price(timestamp, new_price);
-        self.rsi_sequence_1h.update_price(timestamp, new_price);
-        self.rsi_sequence_4h.update_price(timestamp, new_price);
+
+        for rsi_sequence in self.rsi_sequences.iter_mut() {
+            rsi_sequence.update_price(timestamp, new_price);
+        }
 
         self.market_states.push(new_market_state);
     }
 
     fn recommend(&self) -> Vec<OrderRecommendation> {
-        let rsis = once(&self.rsi_sequence_4h)
-            .chain(once(&self.rsi_sequence_1h))
-            .chain(once(&self.rsi_sequence_15m));
-
-        match recommend_side_by_rsis(rsis) {
+        match recommend_side_by_rsis(&self.rsi_sequences) {
             Some((OrderSide::Buy, reason)) => {
                 // Create buy order
                 let last_state = self.market_states.last().unwrap();
@@ -192,18 +192,18 @@ fn recommend_side_by_rsi(rsi_sequence: &TimespanRsiSequence) -> SideRecommendati
                     if latest.percent() > buy_th && prev.percent() < buy_th {
                         let description = RecommendationDescription {
                             reason: format!(
-                                "Buy. RSI: {} (RSI chunk: {}m)",
+                                "Buy. RSI: {} (RSI timespan: {}m)",
                                 latest.percent(),
-                                rsi_sequence.duration_chunk().num_minutes()
+                                rsi_sequence.timespan().num_minutes()
                             ),
                         };
                         SideRecommendation::Buy(description)
                     } else if latest.percent() < sell_th && prev.percent() > sell_th {
                         let description = RecommendationDescription {
                             reason: format!(
-                                "Sell. RSI: {} (RSI chunk: {}m)",
+                                "Sell. RSI: {} (RSI timespan: {}m)",
                                 latest.percent(),
-                                rsi_sequence.duration_chunk().num_minutes()
+                                rsi_sequence.timespan().num_minutes()
                             ),
                         };
                         SideRecommendation::Sell(description)

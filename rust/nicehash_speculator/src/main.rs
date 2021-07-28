@@ -7,6 +7,7 @@ use database::model::*;
 use database::schema;
 use diesel::prelude::*;
 use once_cell::sync::Lazy;
+use speculator::rsi::Duration;
 use speculator::speculator::{MarketState, MultipleRsiSpeculator, OrderRecommendation, Speculator};
 use std::collections::HashMap;
 use std::env;
@@ -47,11 +48,24 @@ fn parse_market_symbols(
         .collect()
 }
 
+fn parse_rsi_timespans(minutes_str: &str) -> Result<Vec<Duration>> {
+    minutes_str
+        .split(':')
+        .map(|minutes_str| {
+            i64::from_str(minutes_str)
+                .map(Duration::minutes)
+                .map_err(Into::into)
+        })
+        .collect()
+}
+
 fn batch() -> Result<()> {
     let url = env::var("DATABASE_URL")?;
     let conn = Conn::establish(&url)?;
 
     let rsi_window_size = env::var("RSI_WINDOW_SIZE")?.apply(|s| usize::from_str(&s))?;
+    let rsi_timespans = env::var("RSI_CHUNK_TIME_MINUTES")?
+        .apply_ref(|minutes_str| parse_rsi_timespans(minutes_str))?;
 
     let currency_collection = list_currencies(&conn)?;
     let market_collection = list_markets(&conn)?;
@@ -69,7 +83,7 @@ fn batch() -> Result<()> {
 
     let oldest_stamp_in_rsi_window = schema::stamp::table
         .order(schema::stamp::stamp_id.desc())
-        .limit(12 * 4 * 20 * speculator_target_markets.len() as i64)
+        .limit(2 * 12 * 4 * 20 * speculator_target_markets.len() as i64)
         .load::<Stamp>(&conn)?
         .last()
         .cloned()
@@ -92,7 +106,11 @@ fn batch() -> Result<()> {
     for (price, market, stamp) in records.into_iter() {
         let speculator = speculators
             .entry(market.market_id)
-            .or_insert(MultipleRsiSpeculator::new(market, rsi_window_size));
+            .or_insert(MultipleRsiSpeculator::new(
+                market,
+                rsi_window_size,
+                rsi_timespans.clone(),
+            ));
 
         let market_state = MarketState {
             stamp,
