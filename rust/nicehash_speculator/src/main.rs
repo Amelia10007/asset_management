@@ -59,6 +59,39 @@ fn parse_rsi_timespans(minutes_str: &str) -> Result<Vec<Duration>> {
         .collect()
 }
 
+fn format_recommendation(
+    recommendation: OrderRecommendation,
+    market_collection: &MarketCollection,
+    currency_collection: &CurrencyCollection,
+) -> String {
+    let market_id = match &recommendation {
+        OrderRecommendation::Open(order, _) => order.market_id,
+        OrderRecommendation::Cancel(order, _) => order.market_id,
+    };
+    let description = match recommendation {
+        OrderRecommendation::Open(_, description) => description,
+        OrderRecommendation::Cancel(_, description) => description,
+    };
+
+    let market = market_collection
+        .markets()
+        .iter()
+        .find(|m| m.market_id == market_id)
+        .unwrap();
+
+    let base = currency_collection.by_id(market.base_id).unwrap();
+    let quote = currency_collection.by_id(market.quote_id).unwrap();
+
+    let message = format!(
+        "Market {}-{}: {}",
+        base.symbol,
+        quote.symbol,
+        description.reason()
+    );
+
+    message
+}
+
 fn batch() -> Result<()> {
     let url = env::var("DATABASE_URL")?;
     let conn = Conn::establish(&url)?;
@@ -134,14 +167,9 @@ fn batch() -> Result<()> {
         );
 
         for recommend in recommendations.into_iter() {
-            match recommend {
-                OrderRecommendation::Open(order, description) => {
-                    info!(LOGGER, "{}: {:?}", description.reason(), order)
-                }
-                OrderRecommendation::Cancel(order, description) => {
-                    info!(LOGGER, "{}: {}", description.reason(), order.transaction_id)
-                }
-            }
+            let message =
+                format_recommendation(recommend, &market_collection, &currency_collection);
+            info!(LOGGER, "{}", message);
         }
     }
 
