@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>{{title}}</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="text/javascript" src="index.js"></script>
+</head>
+
+<body>
+    <p>Your total assets on {{date}} of Simulator</p>
+    <table border="1">
+        <tr>
+            <th>Currency</th>
+            <th>Symbol</th>
+            <th>Available</th>
+            <th>Pending</th>
+            <th>Total Balance</th>
+            <th>Rate to {{conversion.name}}</th>
+            <th>Conversion to {{conversion.name}}</th>
+        </tr>
+        {%- for balance in balances %}
+        <tr>
+            <td>{{balance.name}}</td>
+            <td>{{balance.symbol}}</td>
+            <td align="right">{{balance.available}} {{balance.symbol}}</td>
+            <td align="right">{{balance.pending}} {{balance.symbol}}</td>
+            <td align="right">{{balance.total}} {{balance.symbol}}</td>
+            <td align="right">1 {{balance.symbol}} = {{balance.rate}} {{conversion.symbol}}</td>
+            <td align="right">{{balance.conversion}} {{conversion.symbol}}</td>
+        </tr>
+        {%- end for %}
+    </table>
+</body>
+
+</html>

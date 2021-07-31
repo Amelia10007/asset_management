@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>{{title}}</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="text/javascript" src="index.js"></script>
+</head>
+
+<body>
+    <p>Your total balance history based on {{fiat}}</p>
+    <table border="1">
+        <tr>
+            <th>Timestamp</th>
+            <th>Balance</th>
+        </tr>
+        {%- for h in history %}
+        <tr>
+            <td>{{h.stamp}}</td>
+            <td>{{h.balance}}</td>
+        </tr>
+        {%- end for %}
+    </table>
+</body>
+
+</html>
