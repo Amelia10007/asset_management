@@ -1,8 +1,11 @@
+use std::borrow::Cow;
+
 use crate::rsi::{Duration, TimespanRsiSequence};
+use apply::Apply;
 use database::model::*;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct IncompoleteMyOrder {
+pub struct IncompleteMyorder {
     pub market_id: IdType,
     pub price: Amount,
     pub base_quantity: Amount,
@@ -13,8 +16,32 @@ pub struct IncompoleteMyOrder {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OrderRecommendation {
-    Open(IncompoleteMyOrder, RecommendationDescription),
+    Open(IncompleteMyorder, RecommendationDescription),
     Cancel(MyOrder, RecommendationDescription),
+}
+
+impl OrderRecommendation {
+    pub fn incomplete_myorder(&self) -> Cow<IncompleteMyorder> {
+        match self {
+            OrderRecommendation::Open(o, _) => Cow::Borrowed(o),
+            OrderRecommendation::Cancel(o, _) => IncompleteMyorder {
+                market_id: o.market_id,
+                price: o.price,
+                base_quantity: o.base_quantity,
+                quote_quantity: o.quote_quantity,
+                order_type: o.order_type,
+                side: o.side,
+            }
+            .apply(Cow::Owned),
+        }
+    }
+
+    pub fn description(&self) -> &RecommendationDescription {
+        match self {
+            OrderRecommendation::Open(_, d) => d,
+            OrderRecommendation::Cancel(_, d) => d,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,7 +58,6 @@ impl RecommendationDescription {
 #[derive(Debug, Clone)]
 pub struct MarketState {
     pub stamp: Stamp,
-    pub balance: Balance,
     pub price: Price,
     pub orderbooks: Vec<Orderbook>,
     pub myorders: Vec<MyOrder>,
@@ -40,14 +66,12 @@ pub struct MarketState {
 impl MarketState {
     pub fn new(
         stamp: Stamp,
-        balance: Balance,
         price: Price,
         orderbooks: Vec<Orderbook>,
         myorders: Vec<MyOrder>,
     ) -> Self {
         Self {
             stamp,
-            balance,
             price,
             orderbooks,
             myorders,
@@ -68,7 +92,11 @@ pub trait Speculator {
 
     fn update_market_state(&mut self, new_market_state: MarketState);
 
-    fn recommend(&self) -> Vec<OrderRecommendation>;
+    fn recommend(
+        &self,
+        base_balance: &Balance,
+        quote_balance: &Balance,
+    ) -> Vec<OrderRecommendation>;
 
     fn filter_orderbooks(&self, orderbooks: &mut Vec<Orderbook>) {
         orderbooks.retain(|o| o.market_id == self.market().market_id)
@@ -120,42 +148,24 @@ impl Speculator for MultipleRsiSpeculator {
         self.market_states.push(new_market_state);
     }
 
-    fn recommend(&self) -> Vec<OrderRecommendation> {
+    fn recommend(
+        &self,
+        base_balance: &Balance,
+        quote_balance: &Balance,
+    ) -> Vec<OrderRecommendation> {
         match recommend_side_by_rsis(&self.rsi_sequences) {
             Some((OrderSide::Buy, reason)) => {
                 // Create buy order
                 let last_state = self.market_states.last().unwrap();
-                let spending = last_state.balance.available * 0.1;
-                let price = last_state.price.amount * 1.001;
-                let order = IncompoleteMyOrder {
-                    market_id: self.market.market_id,
-                    price,
-                    base_quantity: spending,
-                    quote_quantity: spending * price,
-                    side: OrderSide::Buy,
-                    order_type: OrderType::Limit,
-                };
-
+                let order = make_limit_buy_order(&self.market, last_state, quote_balance);
                 let recommendation = OrderRecommendation::Open(order, reason);
-
                 vec![recommendation]
             }
             Some((OrderSide::Sell, reason)) => {
                 // Create sell order
                 let last_state = self.market_states.last().unwrap();
-                let spending = last_state.balance.available * 0.1;
-                let price = last_state.price.amount * 0.999;
-                let order = IncompoleteMyOrder {
-                    market_id: self.market.market_id,
-                    price,
-                    base_quantity: spending,
-                    quote_quantity: spending * price,
-                    side: OrderSide::Sell,
-                    order_type: OrderType::Limit,
-                };
-
+                let order = make_limit_sell_order(&self.market, last_state, base_balance);
                 let recommendation = OrderRecommendation::Open(order, reason);
-
                 vec![recommendation]
             }
             None => {
@@ -220,4 +230,46 @@ fn recommend_side_by_rsi(rsi_sequence: &TimespanRsiSequence) -> SideRecommendati
         }
         None => SideRecommendation::Undetermined,
     }
+}
+
+fn make_limit_buy_order(
+    market: &Market,
+    market_state: &MarketState,
+    quote_balance: &Balance,
+) -> IncompleteMyorder {
+    let quote_quantity = quote_balance.available * 0.1;
+    let price = market_state.price.amount * 1.001;
+    let base_quantity = quote_quantity / price;
+
+    let order = IncompleteMyorder {
+        market_id: market.market_id,
+        price,
+        base_quantity,
+        quote_quantity,
+        side: OrderSide::Buy,
+        order_type: OrderType::Limit,
+    };
+
+    order
+}
+
+fn make_limit_sell_order(
+    market: &Market,
+    market_state: &MarketState,
+    base_balance: &Balance,
+) -> IncompleteMyorder {
+    let base_quantity = base_balance.available * 0.1;
+    let price = market_state.price.amount * 0.999;
+    let quote_quantity = base_quantity * price;
+
+    let order = IncompleteMyorder {
+        market_id: market.market_id,
+        price,
+        base_quantity,
+        quote_quantity,
+        side: OrderSide::Sell,
+        order_type: OrderType::Limit,
+    };
+
+    order
 }

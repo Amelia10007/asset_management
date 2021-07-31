@@ -39,6 +39,10 @@ impl MarketCollection {
         self.markets.as_slice()
     }
 
+    pub fn by_id(&self, market_id: IdType) -> Option<&Market> {
+        self.markets.iter().find(|m| m.market_id == market_id)
+    }
+
     pub fn by_base_quote_id(
         &self,
         base_currency_id: IdType,
