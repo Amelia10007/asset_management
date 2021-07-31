@@ -237,7 +237,7 @@ fn make_limit_buy_order(
     market_state: &MarketState,
     quote_balance: &Balance,
 ) -> IncompleteMyorder {
-    let quote_quantity = quote_balance.available * 0.1;
+    let quote_quantity = quote_balance.available * 0.01;
     let price = market_state.price.amount * 1.001;
     let base_quantity = quote_quantity / price;
 
@@ -258,7 +258,7 @@ fn make_limit_sell_order(
     market_state: &MarketState,
     base_balance: &Balance,
 ) -> IncompleteMyorder {
-    let base_quantity = base_balance.available * 0.1;
+    let base_quantity = base_balance.available * 0.01;
     let price = market_state.price.amount * 0.999;
     let quote_quantity = base_quantity * price;
 
