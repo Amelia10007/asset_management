@@ -10,6 +10,13 @@ impl<K, V> HttpQuery<K, V> {
         std::iter::empty().collect()
     }
 
+    pub fn get(&self, key: &K) -> Option<&V>
+    where
+        K: PartialEq,
+    {
+        self.queries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+
     pub fn build_query(&self) -> String
     where
         K: ToString,
@@ -36,6 +43,21 @@ impl<K, V> HttpQuery<K, V> {
     }
 }
 
+impl<'a> HttpQuery<&'a str, &'a str> {
+    pub fn parse(query_str: &'a str) -> HttpQuery<&'a str, &'a str> {
+        query_str
+            .split('&')
+            .filter_map(|split| {
+                let mut iter = split.split('=');
+                match (iter.next(), iter.next()) {
+                    (Some(key), Some(value)) => Some((key, value)),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+}
+
 impl<K, V> FromIterator<(K, V)> for HttpQuery<K, V> {
     fn from_iter<A>(iter: A) -> Self
     where
@@ -57,6 +79,14 @@ mod tests {
         let query = q.build_query();
 
         assert_eq!("", &query);
+    }
+
+    #[test]
+    fn test_parse() {
+        let q = HttpQuery::parse("key=1&answer=42");
+
+        assert_eq!(Some(&"1"), q.get(&"key"));
+        assert_eq!(Some(&"42"), q.get(&"answer"));
     }
 
     #[test]
