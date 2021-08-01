@@ -19,6 +19,7 @@ crontab -l > tmpcron
 echo >> tmpcron
 echo '# Automatically appended schedule by asset_management' >> tmpcron
 echo "*/5 * * * * ${SCRIPT_DIR}/scraping.sh" >> tmpcron
+echo "0 12 * * 0 ${SCRIPT_DIR}/log_archive.sh" >> tmpcron
 crontab tmpcron
 
 service cron enable
