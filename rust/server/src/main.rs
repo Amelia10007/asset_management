@@ -1,7 +1,6 @@
 use apply::{Also, Apply};
-use common::alias::Result;
+use common::alias::{BoxErr, Result};
 use common::err::OkOpt;
-use common::http_query::HttpQuery;
 use database::diesel::prelude::*;
 use database::diesel::{self, QueryDsl, RunQueryDsl};
 use database::logic::{list_currencies, Conn};
@@ -10,36 +9,95 @@ use database::schema;
 use exchange_graph::ExchangeGraph;
 use hyper::server::Server;
 use hyper::service::*;
-use hyper::{Body, Request, Response};
+use hyper::{Body, Request, Response, Uri};
 use rayon::prelude::*;
 use std::env;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::ops::Deref;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use templar::*;
 
 mod exchange_graph;
 
+type HttpQuery<'a> = common::http_query::HttpQuery<&'a str, &'a str>;
+
+enum ContentType<'a> {
+    Static(&'a str),
+    Template(String, HttpQuery<'a>, fn(HttpQuery<'a>) -> Result<Document>),
+    ApiCall(HttpQuery<'a>, fn(HttpQuery<'a>) -> Result<String>),
+}
+
+impl<'a> ContentType<'a> {
+    pub fn parse_uri(uri: &'a Uri) -> Result<Self> {
+        use ContentType::*;
+
+        // Skip front slash
+        let path = &uri.path()[1..];
+        let query = HttpQuery::parse(uri.query().unwrap_or_default());
+
+        if path.starts_with("api/") {
+            let api_path = &path["api/".len()..];
+            Err(BoxErr::from(format!("Invalid api path: {}", api_path)))
+        } else if path.contains(".template.html") {
+            let path = path.to_string();
+            match path.as_str().trim_end_matches(".template.html") {
+                "balance_current" => Ok(Template(path, query, render_balance_current)),
+                "balance_current_sim" => Ok(Template(path, query, render_balance_current_sim)),
+                "balance_history_sim" => Ok(Template(path, query, render_balance_history_sim)),
+                _ => Err(BoxErr::from(format!("Invalid app path: {}", path))),
+            }
+        } else {
+            let is_safe_path = path
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+            if is_safe_path {
+                Ok(Static(path))
+            } else {
+                Err(BoxErr::from(format!("Invalid path: {}", path)))
+            }
+        }
+    }
+
+    pub fn render(self) -> Result<Vec<u8>> {
+        use ContentType::*;
+
+        match self {
+            Static(path) => read_bytes_from_file(path).map_err(Into::into),
+            Template(path, query, f) => {
+                let template_param = f(query)?;
+
+                let template_content = read_string_from_file(path)?;
+                let template = Templar::global().parse(&template_content)?;
+
+                let context = StandardContext::new();
+                context.set(template_param)?;
+
+                let rendered = template.render(&context)?;
+                Ok(rendered.into_bytes())
+            }
+            ApiCall(query, f) => f(query).map(String::into_bytes),
+        }
+    }
+}
+
 async fn handle(req: Request<Body>) -> Result<Response<Body>> {
     dotenv::dotenv().ok();
 
-    let render = match req.uri().path() {
-        "/balance" => render_currenct_balance_page(req),
-        "/balance_sim" => render_currenct_simulation_balance_page(req),
-        "/history_sim" => render_simulation_page(req),
-        path => format!("Invalid path: {}", path).apply(Ok),
+    let content = match ContentType::parse_uri(req.uri()).and_then(ContentType::render) {
+        Ok(content) => content,
+        Err(e) => {
+            println!("{}", e);
+            "<html><body>An error occurred during dealing with http request <a href=\"index.html\">index</a></body></html>"
+            .as_bytes().to_vec()
+        }
     };
 
-    let body = match render {
-        Ok(body) => body,
-        Err(e) => format!("Error: {}", e),
-    };
-
-    Ok(Response::new(Body::from(body)))
+    Ok(Response::new(Body::from(content)))
 }
 
-fn render_currenct_balance_page(req: Request<Body>) -> Result<String> {
+fn render_balance_current(query: HttpQuery<'_>) -> Result<Document> {
     let conn = env::var("DATABASE_URL")?.deref().apply(Conn::establish)?;
 
     let latest_timestamp: Stamp = {
@@ -56,7 +114,6 @@ fn render_currenct_balance_page(req: Request<Body>) -> Result<String> {
     let exchange_graph = construct_exchange_graph(&conn, latest_timestamp.stamp_id)?;
 
     let base_currency: Currency = {
-        let query = HttpQuery::parse(req.uri().query().unwrap_or_default());
         let base_symbol = query.get(&"fiat").unwrap_or(&"USDT");
         schema::currency::table
             .filter(schema::currency::symbol.eq(base_symbol))
@@ -105,21 +162,10 @@ fn render_currenct_balance_page(req: Request<Body>) -> Result<String> {
             .collect::<Vec<_>>(),
     );
 
-    let mut file = std::fs::File::open("/home/mk/asset_management/WebContent/index.html")?;
-    let mut template = String::new();
-    file.read_to_string(&mut template)?;
-
-    let template = Templar::global().parse(&template)?;
-
-    let context = StandardContext::new();
-    context.set(data)?;
-
-    let rendered = template.render(&context)?;
-
-    Ok(rendered)
+    Ok(data)
 }
 
-fn render_currenct_simulation_balance_page(req: Request<Body>) -> Result<String> {
+fn render_balance_current_sim(query: HttpQuery<'_>) -> Result<Document> {
     let conn = env::var("DATABASE_URL")?.deref().apply(Conn::establish)?;
     let sim_conn = env::var("SIM_DATABASE_URL")?
         .deref()
@@ -139,7 +185,6 @@ fn render_currenct_simulation_balance_page(req: Request<Body>) -> Result<String>
     let exchange_graph = construct_exchange_graph(&conn, latest_timestamp.stamp_id)?;
 
     let base_currency: Currency = {
-        let query = HttpQuery::parse(req.uri().query().unwrap_or_default());
         let base_symbol = query.get(&"fiat").unwrap_or(&"USDT");
         schema::currency::table
             .filter(schema::currency::symbol.eq(base_symbol))
@@ -194,27 +239,14 @@ fn render_currenct_simulation_balance_page(req: Request<Body>) -> Result<String>
             .collect::<Vec<_>>(),
     );
 
-    let mut file = std::fs::File::open("/home/mk/asset_management/WebContent/sim_balance.html")?;
-    let mut template = String::new();
-    file.read_to_string(&mut template)?;
-
-    let template = Templar::global().parse(&template)?;
-
-    let context = StandardContext::new();
-    context.set(data)?;
-
-    let rendered = template.render(&context)?;
-
-    Ok(rendered)
+    Ok(data)
 }
 
-fn render_simulation_page(req: Request<Body>) -> Result<String> {
+fn render_balance_history_sim(query: HttpQuery<'_>) -> Result<Document> {
     let conn = env::var("DATABASE_URL")?.deref().apply(Conn::establish)?;
     let sim_conn = env::var("SIM_DATABASE_URL")?
         .deref()
         .apply(Conn::establish)?;
-
-    let query = HttpQuery::parse(req.uri().query().unwrap_or_default());
 
     let stamps = {
         let limit = query
@@ -271,23 +303,31 @@ fn render_simulation_page(req: Request<Body>) -> Result<String> {
         .collect::<Vec<_>>();
 
     let mut data = Document::default();
-    data["title"] = "Autotrader Simulation History".into();
-    data["fiat"] = base_currency.symbol.clone().into();
-
+    data["title"] = "Balance history (simulation)".into();
+    data["fiat"] = base_currency.symbol.into();
     data["history"] = Document::Seq(total_balance_history);
+    Ok(data)
+}
 
-    let mut file = std::fs::File::open("/home/mk/asset_management/WebContent/sim_history.html")?;
-    let mut template = String::new();
-    file.read_to_string(&mut template)?;
+fn read_bytes_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
+    let path = env::var("WEBCONTENT_ROOT")?
+        .deref()
+        .apply(PathBuf::from)
+        .apply_ref(|p| p.join(path));
 
-    let template = Templar::global().parse(&template)?;
+    println!("Debug: path: {:?}", path);
 
-    let context = StandardContext::new();
-    context.set(data)?;
+    let mut file = std::fs::File::open(path)?;
+    let mut bytes = vec![];
 
-    let rendered = template.render(&context)?;
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
 
-    Ok(rendered)
+fn read_string_from_file<P: AsRef<Path>>(path: P) -> Result<String> {
+    read_bytes_from_file(path)?
+        .apply(String::from_utf8)
+        .map_err(Into::into)
 }
 
 fn construct_exchange_graph(conn: &Conn, timestamp_id: IdType) -> Result<ExchangeGraph<IdType>> {
