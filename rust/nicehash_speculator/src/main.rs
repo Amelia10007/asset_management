@@ -247,7 +247,7 @@ fn batch() -> Result<()> {
         sync_balance(&conn, &sim_conn, latest_stamp.clone())?;
         info!(LOGGER, "Sync balance. timestamp: {:?}", latest_stamp);
         Ok(())
-    } else {
+    } else if let Ok("1") = env::var("SIM_ENABLE_TRADE").as_deref() {
         batch_sim(
             &sim_conn,
             &currency_collection,
@@ -255,6 +255,8 @@ fn batch() -> Result<()> {
             latest_stamp,
             speculators.values(),
         )
+    }else{
+        Ok(())
     }
 }
 
