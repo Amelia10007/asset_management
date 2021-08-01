@@ -1,6 +1,7 @@
 use apply::{Also, Apply};
 use common::alias::{BoxErr, Result};
 use common::err::OkOpt;
+use common::log::prelude::*;
 use database::diesel::prelude::*;
 use database::diesel::{self, QueryDsl, RunQueryDsl};
 use database::logic::{list_currencies, Conn};
@@ -10,9 +11,10 @@ use exchange_graph::ExchangeGraph;
 use hyper::server::Server;
 use hyper::service::*;
 use hyper::{Body, Request, Response, Uri};
+use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use std::env;
-use std::io::Read;
+use std::io::{stdout, Read, Stdout};
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -22,6 +24,20 @@ use templar::*;
 mod exchange_graph;
 
 type HttpQuery<'a> = common::http_query::HttpQuery<&'a str, &'a str>;
+
+static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
+    let level = match env::var("SERVER_LOGGER_LEVEL")
+        .map(|s| s.to_lowercase())
+        .as_deref()
+    {
+        Ok("error") => LogLevel::Error,
+        Ok("warn") => LogLevel::Warning,
+        Ok("info") => LogLevel::Info,
+        Ok("debug") => LogLevel::Debug,
+        _ => LogLevel::Debug,
+    };
+    Logger::new(stdout(), level)
+});
 
 enum ContentType<'a> {
     Static(&'a str),
@@ -88,7 +104,7 @@ async fn handle(req: Request<Body>) -> Result<Response<Body>> {
     let content = match ContentType::parse_uri(req.uri()).and_then(ContentType::render) {
         Ok(content) => content,
         Err(e) => {
-            println!("{}", e);
+            warn!(LOGGER, "{}", e);
             "<html><body>An error occurred during dealing with http request <a href=\"index.html\">index</a></body></html>"
             .as_bytes().to_vec()
         }
@@ -315,7 +331,7 @@ fn read_bytes_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
         .apply(PathBuf::from)
         .apply_ref(|p| p.join(path));
 
-    println!("Debug: path: {:?}", path);
+    debug!(LOGGER, "Read file: {:?}", path);
 
     let mut file = std::fs::File::open(path)?;
     let mut bytes = vec![];
@@ -347,7 +363,18 @@ fn construct_exchange_graph(conn: &Conn, timestamp_id: IdType) -> Result<Exchang
 
 #[tokio::main]
 async fn main() {
-    let addr = SocketAddr::from(([127, 0, 0, 1], 7878));
+    dotenv::dotenv().ok();
+
+    let addr = match env::var("SERVER_ADDRESS")
+        .map_err(BoxErr::from)
+        .and_then(|addr| SocketAddr::from_str(&addr).map_err(BoxErr::from))
+    {
+        Ok(addr) => addr,
+        Err(e) => {
+            error!(LOGGER, "Can't determine server address: {}", e);
+            return;
+        }
+    };
 
     let make_service = make_service_fn(|_conn| async { Result::Ok(service_fn(handle)) });
 
