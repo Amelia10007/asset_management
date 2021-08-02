@@ -4,11 +4,14 @@
 <head>
     <title>{{title}}</title>
     <link rel="stylesheet" href="style.css">
-    <script type="text/javascript" src="index.js"></script>
+    <script type="text/javascript" src="header_footer.js"></script>
 </head>
 
 <body>
-    <p>Your total balance history based on {{fiat}}</p>
+
+    <div id="header"></div>
+
+    <p>Your total balance history based on {{fiat}} {% if sim %}(Simulation){% end if %}</p>
     <table border="1">
         <tr>
             <th>Timestamp</th>
@@ -21,6 +24,8 @@
         </tr>
         {%- end for %}
     </table>
+
+    <div id="footer"></div>
 </body>
 
 </html>

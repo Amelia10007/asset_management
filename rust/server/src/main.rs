@@ -55,8 +55,7 @@ impl<'a> ContentType<'a> {
             let path = path.to_string();
             match path.as_str().trim_end_matches(".template.html") {
                 "balance_current" => Ok(Template(path, query, render_balance_current)),
-                "balance_current_sim" => Ok(Template(path, query, render_balance_current_sim)),
-                "balance_history_sim" => Ok(Template(path, query, render_balance_history_sim)),
+                "balance_history" => Ok(Template(path, query, render_balance_history)),
                 _ => Err(BoxErr::from(format!("Invalid app path: {}", path))),
             }
         } else {

@@ -2,13 +2,16 @@
 <html>
 
 <head>
-    <title>{{title}}</title>
+    <title>Total balance{{title}}</title>
     <link rel="stylesheet" href="style.css">
-    <script type="text/javascript" src="index.js"></script>
+    <script type="text/javascript" src="header_footer.js"></script>
 </head>
 
 <body>
-    <p>Your total assets on {{date}}</p>
+
+    <div id="header"></div>
+
+    <p>Your total assets on {{date}} {% if sim %}(Simulation){% end if %}</p>
     <table border="1">
         <tr>
             <th>Currency</th>
@@ -31,6 +34,8 @@
         </tr>
         {%- end for %}
     </table>
+
+    <div id="footer"></div>
 </body>
 
 </html>
