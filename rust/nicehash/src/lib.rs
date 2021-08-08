@@ -4,6 +4,7 @@ use api_common::*;
 use apply::Apply;
 use common::alias::Result;
 use database::model::*;
+use json::JsonValue;
 use std::str::FromStr;
 
 #[derive(Debug, Clone)]
@@ -155,30 +156,34 @@ where
     let json = ApiCallBuilder::new()
         .public_api()
         .method(Method::GET)
-        .path("/exchange/api/v2/info/trades")
+        .path("/exchange/api/v2/orderbook")
         .query(query)
         .call()?;
 
-    json.members()
-        .filter_map(|order_json| {
-            let side = match order_json["dir"].as_str() {
-                Some("BUY") => Some(OrderSide::Buy),
-                Some("SELL") => Some(OrderSide::Sell),
-                _ => None,
-            }?;
-            let price = order_json["price"].as_f32()?;
-            let volume = order_json["qty"].as_f32()?;
-
-            let orderbook = IncompleteOrderbook {
+    let parse_orders = |json: &JsonValue, side: OrderSide| {
+        json.members()
+            .filter_map(|buy_order_json| {
+                let price = buy_order_json[0].as_f32();
+                let volume = buy_order_json[1].as_f32();
+                match (price, volume) {
+                    (Some(price), Some(volume)) => Some((price, volume)),
+                    _ => None,
+                }
+            })
+            .map(|(price, volume)| IncompleteOrderbook {
                 side,
                 price,
                 volume,
-            };
+            })
+            .collect::<Vec<_>>()
+    };
 
-            Some(orderbook)
-        })
-        .collect::<Vec<_>>()
-        .apply(Ok)
+    let mut buy_orders = parse_orders(&json["buy"], OrderSide::Buy);
+    let mut sell_orders = parse_orders(&json["sell"], OrderSide::Sell);
+
+    buy_orders.append(&mut sell_orders);
+
+    Ok(buy_orders)
 }
 
 pub fn fetch_myorders<S: AsRef<str>>(
