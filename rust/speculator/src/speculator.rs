@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::rsi::{Duration, TimespanRsiSequence};
+use crate::rsi::{Duration, RsiHistory};
 use apply::Apply;
 use database::model::*;
 
@@ -112,22 +112,22 @@ pub struct MultipleRsiSpeculator {
     market: Market,
     market_states: Vec<MarketState>,
     // RSI ordered by timespan descending
-    rsi_sequences: Vec<TimespanRsiSequence>,
+    rsi_histories: Vec<RsiHistory>,
+    spend_balance_ratio: Amount,
 }
 
 impl MultipleRsiSpeculator {
-    pub fn new(market: Market, rsi_window_size: usize, mut rsi_timespans: Vec<Duration>) -> Self {
-        rsi_timespans.sort();
-
-        let rsi_sequences = rsi_timespans
+    pub fn new(market: Market, rsi_timespans: Vec<Duration>, spend_balance_ratio: Amount) -> Self {
+        let rsi_histories = rsi_timespans
             .into_iter()
-            .map(|span| TimespanRsiSequence::new(span, rsi_window_size))
+            .map(|span| RsiHistory::new(span))
             .collect();
 
         Self {
             market,
             market_states: vec![],
-            rsi_sequences,
+            rsi_histories,
+            spend_balance_ratio,
         }
     }
 }
@@ -141,8 +141,8 @@ impl Speculator for MultipleRsiSpeculator {
         let timestamp = new_market_state.stamp.timestamp;
         let new_price = new_market_state.price.amount as f64;
 
-        for rsi_sequence in self.rsi_sequences.iter_mut() {
-            rsi_sequence.update_price(timestamp, new_price);
+        for rsi_history in self.rsi_histories.iter_mut() {
+            rsi_history.update_price(timestamp, new_price);
         }
 
         self.market_states.push(new_market_state);
@@ -153,18 +153,28 @@ impl Speculator for MultipleRsiSpeculator {
         base_balance: &Balance,
         quote_balance: &Balance,
     ) -> Vec<OrderRecommendation> {
-        match recommend_side_by_rsis(&self.rsi_sequences) {
+        match recommend_side_by_rsis(&self.rsi_histories) {
             Some((OrderSide::Buy, reason)) => {
                 // Create buy order
                 let last_state = self.market_states.last().unwrap();
-                let order = make_limit_buy_order(&self.market, last_state, quote_balance);
+                let order = make_limit_buy_order(
+                    &self.market,
+                    last_state,
+                    quote_balance,
+                    self.spend_balance_ratio,
+                );
                 let recommendation = OrderRecommendation::Open(order, reason);
                 vec![recommendation]
             }
             Some((OrderSide::Sell, reason)) => {
                 // Create sell order
                 let last_state = self.market_states.last().unwrap();
-                let order = make_limit_sell_order(&self.market, last_state, base_balance);
+                let order = make_limit_sell_order(
+                    &self.market,
+                    last_state,
+                    base_balance,
+                    self.spend_balance_ratio,
+                );
                 let recommendation = OrderRecommendation::Open(order, reason);
                 vec![recommendation]
             }
@@ -176,10 +186,10 @@ impl Speculator for MultipleRsiSpeculator {
 }
 
 fn recommend_side_by_rsis<'a>(
-    rsis: impl IntoIterator<Item = &'a TimespanRsiSequence>,
+    rsi_histories: impl IntoIterator<Item = &'a RsiHistory>,
 ) -> Option<(OrderSide, RecommendationDescription)> {
-    for rsi_sequence in rsis.into_iter() {
-        match recommend_side_by_rsi(rsi_sequence) {
+    for rsi_history in rsi_histories.into_iter() {
+        match recommend_side_by_rsi(rsi_history) {
             SideRecommendation::Buy(reason) => return Some((OrderSide::Buy, reason)),
             SideRecommendation::Sell(reason) => return Some((OrderSide::Sell, reason)),
             SideRecommendation::Pending => return None,
@@ -190,45 +200,36 @@ fn recommend_side_by_rsis<'a>(
     None
 }
 
-fn recommend_side_by_rsi(rsi_sequence: &TimespanRsiSequence) -> SideRecommendation {
+fn recommend_side_by_rsi(rsi_history: &RsiHistory) -> SideRecommendation {
     let buy_th = 30.0;
     let sell_th = 70.0;
 
-    match rsi_sequence.rsi_sequence_opt() {
-        Some(rsis) => {
-            let mut iter = rsis.into_iter().rev();
-            match (iter.next().flatten(), iter.next().flatten()) {
-                (Some(latest), Some(prev)) => {
-                    if latest.percent() > buy_th && prev.percent() < buy_th {
-                        let description = RecommendationDescription {
-                            reason: format!(
-                                "Buy. RSI: {} (RSI timespan: {}m)",
-                                latest.percent(),
-                                rsi_sequence.timespan().num_minutes()
-                            ),
-                        };
-                        SideRecommendation::Buy(description)
-                    } else if latest.percent() < sell_th && prev.percent() > sell_th {
-                        let description = RecommendationDescription {
-                            reason: format!(
-                                "Sell. RSI: {} (RSI timespan: {}m)",
-                                latest.percent(),
-                                rsi_sequence.timespan().num_minutes()
-                            ),
-                        };
-                        SideRecommendation::Sell(description)
-                    } else if latest.percent() < buy_th {
-                        SideRecommendation::Pending
-                    } else if latest.percent() > sell_th {
-                        SideRecommendation::Pending
-                    } else {
-                        SideRecommendation::Undetermined
-                    }
-                }
-                _ => SideRecommendation::Undetermined,
-            }
+    let mut rsis = rsi_history.rsis();
+    let last = rsis.next_back().copied().flatten().map(|rsi| rsi.percent());
+    let last2 = rsis.next_back().copied().flatten().map(|rsi| rsi.percent());
+
+    match (last2, last) {
+        (Some(last2), Some(last)) if last2 < buy_th && last >= buy_th => {
+            let reason = format!(
+                "RSI: {}, Timespan: {}m",
+                last,
+                rsi_history.timespan().num_minutes()
+            );
+            let description = RecommendationDescription { reason };
+            SideRecommendation::Buy(description)
         }
-        None => SideRecommendation::Undetermined,
+        (Some(last2), Some(last)) if last2 > sell_th && last <= sell_th => {
+            let reason = format!(
+                "RSI: {}, Timespan: {}m",
+                last,
+                rsi_history.timespan().num_minutes()
+            );
+            let description = RecommendationDescription { reason };
+            SideRecommendation::Sell(description)
+        }
+        (_, Some(last)) if last < buy_th => SideRecommendation::Pending,
+        (_, Some(last)) if last > sell_th => SideRecommendation::Pending,
+        _ => SideRecommendation::Undetermined,
     }
 }
 
@@ -236,8 +237,9 @@ fn make_limit_buy_order(
     market: &Market,
     market_state: &MarketState,
     quote_balance: &Balance,
+    spend_balance_ratio: Amount,
 ) -> IncompleteMyorder {
-    let quote_quantity = quote_balance.available * 0.01;
+    let quote_quantity = quote_balance.available * spend_balance_ratio;
     let price = market_state.price.amount * 1.001;
     let base_quantity = quote_quantity / price;
 
@@ -257,8 +259,9 @@ fn make_limit_sell_order(
     market: &Market,
     market_state: &MarketState,
     base_balance: &Balance,
+    spend_balance_ratio: Amount,
 ) -> IncompleteMyorder {
-    let base_quantity = base_balance.available * 0.01;
+    let base_quantity = base_balance.available * spend_balance_ratio;
     let price = market_state.price.amount * 0.999;
     let quote_quantity = base_quantity * price;
 

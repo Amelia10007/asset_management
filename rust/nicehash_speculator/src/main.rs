@@ -1,4 +1,5 @@
 use apply::Apply;
+use common::alias::BoxErr;
 use common::alias::Result;
 use common::err::OkOpt;
 use common::log::prelude::*;
@@ -31,6 +32,43 @@ static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
     Logger::new(stdout(), level)
 });
 
+fn sync_balance(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp) -> Result<()> {
+    let balances = schema::balance::table
+        .filter(schema::balance::stamp_id.eq(latest_main_stamp.stamp_id))
+        .load::<Balance>(conn)?;
+
+    info!(LOGGER, "Sync: found {} balances in main DB", balances.len());
+
+    for mut balance in balances.into_iter() {
+        balance.balance_id = get_sim_next_balance_id(balance_sim_conn);
+        insert_into(schema::balance::table)
+            .values(balance)
+            .execute(balance_sim_conn)?;
+    }
+
+    info!(LOGGER, "Synced balances with main DB");
+
+    Ok(())
+}
+
+fn get_latest_stamp(conn: &Conn) -> Result<Stamp> {
+    schema::stamp::table
+        .order(schema::stamp::stamp_id.desc())
+        .first(conn)
+        .map_err(Into::into)
+}
+
+fn parse_rsi_timespans(minutes_str: &str) -> Result<Vec<Duration>> {
+    minutes_str
+        .split(':')
+        .map(|minutes_str| {
+            i64::from_str(minutes_str)
+                .map(Duration::minutes)
+                .map_err(Into::into)
+        })
+        .collect()
+}
+
 fn parse_market_symbols(
     s: &str,
     currency_collection: &CurrencyCollection,
@@ -51,73 +89,160 @@ fn parse_market_symbols(
         .collect()
 }
 
-fn parse_rsi_timespans(minutes_str: &str) -> Result<Vec<Duration>> {
-    minutes_str
-        .split(':')
-        .map(|minutes_str| {
-            i64::from_str(minutes_str)
-                .map(Duration::minutes)
-                .map_err(Into::into)
+/// # Returns
+/// Vec of `(base currency, quote currency, rsi)` if succeeds
+fn construct_speculators(
+    conn: &Conn,
+    currency_collection: &CurrencyCollection,
+    market_collection: &MarketCollection,
+    latest_main_stamp: Stamp,
+) -> Result<Vec<(Currency, Currency, MultipleRsiSpeculator)>> {
+    let rsi_timespans = env::var("RSI_TIMESPAN_MINUTES")?
+        .apply_ref(|minutes_str| parse_rsi_timespans(minutes_str))?;
+    let spend_balance_ratio =
+        env::var("SIM_SPEND_BALANCE_RATIO")?.apply(|s| Amount::from_str(&s))?;
+
+    let longest_timespan = rsi_timespans
+        .iter()
+        .max()
+        .copied()
+        .ok_opt("At least one rsi-timespan is required")?;
+    // Twice timespan is required to obtain RSIs in the specified timespan
+    let rsi_oldest_stamp = latest_main_stamp.timestamp - longest_timespan * 2;
+
+    let market_symbols = env::var("SPECULATOR_TARGET_MARKETS")?;
+    let target_markets =
+        parse_market_symbols(&market_symbols, currency_collection, market_collection);
+    debug!(
+        LOGGER,
+        "Oldest stamp within RSI window: {}", rsi_oldest_stamp
+    );
+
+    let speculators = target_markets
+        .into_iter()
+        .filter_map(|(base, quote, market)| {
+            let market_id = market.market_id;
+            let price_stamps = match schema::price::table
+                .inner_join(
+                    schema::stamp::table.on(schema::price::stamp_id.eq(schema::stamp::stamp_id)),
+                )
+                .filter(schema::price::market_id.eq(market_id))
+                .filter(schema::stamp::timestamp.ge(rsi_oldest_stamp))
+                .load::<(Price, Stamp)>(conn)
+            {
+                Ok(price_stamps) => Some(price_stamps),
+                Err(e) => {
+                    warn!(LOGGER, "Can't fetch prices for market {}: {}", market_id, e);
+                    None
+                }
+            }?;
+            debug!(LOGGER, "Use {} price-stamp pairs", price_stamps.len());
+
+            let mut speculator =
+                MultipleRsiSpeculator::new(market, rsi_timespans.clone(), spend_balance_ratio);
+            for (price, stamp) in price_stamps.into_iter() {
+                let orderbooks = schema::orderbook::table
+                    .filter(schema::orderbook::stamp_id.eq(stamp.stamp_id))
+                    .filter(schema::orderbook::market_id.eq(market_id))
+                    .load(conn)
+                    .unwrap_or(vec![]);
+                let myorders = schema::myorder::table
+                    .filter(schema::myorder::market_id.eq(market_id))
+                    .filter(schema::myorder::modified_stamp_id.eq(stamp.stamp_id))
+                    .load(conn)
+                    .unwrap_or(vec![]);
+                let market_state = MarketState {
+                    stamp,
+                    price,
+                    orderbooks,
+                    myorders,
+                };
+                speculator.update_market_state(market_state);
+            }
+            Some((base, quote, speculator))
         })
-        .collect()
+        .collect();
+
+    Ok(speculators)
 }
 
-fn get_sim_next_balance_id(sim_conn: &MysqlConnection) -> IdType {
+fn load_latest_sim_balances(
+    balance_sim_conn: &Conn,
+    currency_collection: &CurrencyCollection,
+) -> Result<HashMap<IdType, Balance>> {
+    let latest_balance_stamp_id = schema::balance::table
+        .select(max(schema::balance::stamp_id))
+        .first::<Option<IdType>>(balance_sim_conn)?
+        .ok_opt("No balance exists in simulation DB")?;
+    currency_collection
+        .currencies()
+        .into_iter()
+        .filter_map(|c| {
+            let latest_balance = schema::balance::table
+                .filter(schema::balance::currency_id.eq(c.currency_id))
+                .order_by(schema::balance::stamp_id.desc())
+                .first(balance_sim_conn)
+                .optional();
+            match latest_balance {
+                Ok(Some(balance)) => Some(balance),
+                Ok(None) => {
+                    info!(
+                        LOGGER,
+                        "Currency {} is not found in simulation balances. Its balance is assumed 0",
+                        c.name
+                    );
+                    let balance_id = get_sim_next_balance_id(balance_sim_conn);
+                    let balance =
+                        Balance::new(balance_id, c.currency_id, latest_balance_stamp_id, 0.0, 0.0);
+                    Some(balance)
+                }
+                Err(e) => {
+                    warn!(LOGGER, "Can't fetch balance of currency {}: {}", c.name, e);
+                    None
+                }
+            }
+        })
+        .map(|b| (b.currency_id, b))
+        .collect::<HashMap<_, _>>()
+        .apply(Ok)
+}
+
+fn get_sim_next_balance_id(balance_sim_conn: &Conn) -> IdType {
     schema::balance::table
         .select(max(schema::balance::balance_id))
-        .first::<Option<i32>>(sim_conn)
+        .first::<Option<i32>>(balance_sim_conn)
         .unwrap_or(None)
         .unwrap_or(0)
         + 1
 }
 
-fn sync_balance(conn: &MysqlConnection, sim_conn: &MysqlConnection, stamp: Stamp) -> Result<()> {
-    let balances = schema::balance::table
-        .filter(schema::balance::stamp_id.eq(stamp.stamp_id))
-        .load::<Balance>(conn)?;
+fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp) -> Result<()> {
+    let currency_collection = list_currencies(&conn)?;
+    let market_collection = list_markets(&conn)?;
 
-    debug!(LOGGER, "Sync: found {} balances", balances.len());
+    let speculators = construct_speculators(
+        conn,
+        &currency_collection,
+        &market_collection,
+        latest_main_stamp.clone(),
+    )?;
 
-    sim_conn.transaction::<(), diesel::result::Error, _>(|| {
-        for mut balance in balances.into_iter() {
-            balance.balance_id = get_sim_next_balance_id(sim_conn);
-            insert_into(schema::balance::table)
-                .values(balance)
-                .execute(sim_conn)?;
-        }
+    let mut current_balances = load_latest_sim_balances(&balance_sim_conn, &currency_collection)?;
 
-        Ok(())
-    })?;
+    let fee_ratio = env::var("SIM_FEE_RATIO")?.deref().apply(Amount::from_str)?;
 
-    Ok(())
-}
-
-fn simulate_trade<'a>(
-    speculators: impl IntoIterator<Item = &'a MultipleRsiSpeculator>,
-    currency_collection: &CurrencyCollection,
-    market_collection: &MarketCollection,
-    current_balances: &[Balance],
-    fee_ratio: Amount,
-) -> Result<HashMap<IdType, Balance>> {
-    let mut balances = current_balances
-        .iter()
-        .map(|balance| (balance.currency_id, balance.clone()))
-        .collect::<HashMap<_, _>>();
-
-    for speculator in speculators.into_iter() {
-        let base_id = speculator.market().base_id;
-        let quote_id = speculator.market().quote_id;
-        let base_balance = match balances.get(&base_id) {
+    for (base, quote, speculator) in speculators.into_iter() {
+        let base_balance = match current_balances.get(&base.currency_id) {
             Some(b) => b,
             None => {
-                warn!(LOGGER, "Currency id {} is not found in balances", base_id);
+                warn!(LOGGER, "Currency {} is not found in balances", base.name);
                 continue;
             }
         };
-        let quote_balance = match balances.get(&quote_id) {
+        let quote_balance = match current_balances.get(&quote.currency_id) {
             Some(b) => b,
             None => {
-                warn!(LOGGER, "Currency id {} is not found in balances", quote_id);
+                warn!(LOGGER, "Currency {} is not found in balances", quote.name);
                 continue;
             }
         };
@@ -133,10 +258,6 @@ fn simulate_trade<'a>(
         for recommend in recommendations.into_iter() {
             let order = recommend.incomplete_myorder();
 
-            let market = market_collection.by_id(order.market_id).unwrap();
-            let base = currency_collection.by_id(market.base_id).unwrap();
-            let quote = currency_collection.by_id(market.quote_id).unwrap();
-
             let base_diff = match order.side {
                 OrderSide::Buy => order.base_quantity * (1.0 - fee_ratio),
                 OrderSide::Sell => -order.base_quantity,
@@ -146,8 +267,14 @@ fn simulate_trade<'a>(
                 OrderSide::Sell => order.quote_quantity * (1.0 - fee_ratio),
             };
 
-            balances.get_mut(&base.currency_id).unwrap().available += base_diff;
-            balances.get_mut(&quote.currency_id).unwrap().available += quote_diff;
+            current_balances
+                .get_mut(&base.currency_id)
+                .unwrap()
+                .available += base_diff;
+            current_balances
+                .get_mut(&quote.currency_id)
+                .unwrap()
+                .available += quote_diff;
 
             info!(
                 LOGGER,
@@ -164,148 +291,50 @@ fn simulate_trade<'a>(
         }
     }
 
-    Ok(balances)
-}
-
-fn batch() -> Result<()> {
-    let url = env::var("DATABASE_URL")?;
-    let conn = Conn::establish(&url)?;
-
-    let rsi_window_size = env::var("RSI_WINDOW_SIZE")?.apply(|s| usize::from_str(&s))?;
-    let rsi_timespans = env::var("RSI_CHUNK_TIME_MINUTES")?
-        .apply_ref(|minutes_str| parse_rsi_timespans(minutes_str))?;
-
-    let currency_collection = list_currencies(&conn)?;
-    let market_collection = list_markets(&conn)?;
-
-    let target_market_ids = {
-        let speculator_target_markets = env::var("SPECULATOR_TARGET_MARKETS")?;
-        let speculator_target_markets = parse_market_symbols(
-            &speculator_target_markets,
-            &currency_collection,
-            &market_collection,
-        );
-        speculator_target_markets
-            .iter()
-            .map(|(_, _, market)| market.market_id)
-            .collect::<Vec<_>>()
-    };
-
-    let records = {
-        let oldest_stamp_in_rsi_window = schema::stamp::table
-            .order(schema::stamp::stamp_id.desc())
-            .limit(2 * 12 * 4 * 20 * target_market_ids.len() as i64)
-            .load::<Stamp>(&conn)?
-            .last()
-            .cloned()
-            .ok_opt("No timestamp exists")?;
-        schema::price::table
-            .inner_join(
-                schema::market::table.on(schema::market::market_id.eq(schema::price::market_id)),
-            )
-            .inner_join(
-                schema::stamp::table.on(schema::price::stamp_id.eq(schema::stamp::stamp_id)),
-            )
-            .filter(schema::market::market_id.eq_any(target_market_ids))
-            .filter(schema::stamp::timestamp.ge(oldest_stamp_in_rsi_window.timestamp))
-            .order(schema::stamp::stamp_id)
-            .load::<(Price, Market, Stamp)>(&conn)?
-    };
-
-    let mut speculators = HashMap::<IdType, MultipleRsiSpeculator>::new();
-
-    debug!(LOGGER, "Speculation source record count: {}", records.len());
-
-    for (price, market, stamp) in records.into_iter() {
-        let speculator = speculators
-            .entry(market.market_id)
-            .or_insert(MultipleRsiSpeculator::new(
-                market.clone(),
-                rsi_window_size,
-                rsi_timespans.clone(),
-            ));
-
-        let market_state = MarketState {
-            stamp,
-            price,
-            orderbooks: vec![],
-            myorders: vec![],
-        };
-
-        speculator.update_market_state(market_state);
-    }
-
-    let latest_stamp = schema::stamp::table
-        .order(schema::stamp::stamp_id.desc())
-        .first::<Stamp>(&conn)?;
-
-    let sim_conn = env::var("SIM_DATABASE_URL")?
-        .deref()
-        .apply_ref(Conn::establish)?;
-
-    if let Ok("1") = env::var("SIM_SYNC_BALANCE").as_deref() {
-        sync_balance(&conn, &sim_conn, latest_stamp.clone())?;
-        info!(LOGGER, "Sync balance. timestamp: {:?}", latest_stamp);
-        Ok(())
-    } else if let Ok("1") = env::var("SIM_ENABLE_TRADE").as_deref() {
-        batch_sim(
-            &sim_conn,
-            &currency_collection,
-            &market_collection,
-            latest_stamp,
-            speculators.values(),
-        )
-    }else{
-        Ok(())
-    }
-}
-
-fn batch_sim<'a>(
-    sim_conn: &MysqlConnection,
-    currency_collection: &CurrencyCollection,
-    market_collection: &MarketCollection,
-    latest_stamp: Stamp,
-    speculators: impl IntoIterator<Item = &'a MultipleRsiSpeculator>,
-) -> Result<()> {
-    let previous_stamp_id = schema::balance::table
-        .select(max(schema::balance::stamp_id))
-        .first::<Option<IdType>>(sim_conn)?
-        .expect("No balance exists in simulation DB");
-
-    let current_balances = schema::balance::table
-        .filter(schema::balance::stamp_id.eq(previous_stamp_id))
-        .load::<Balance>(sim_conn)?;
-    let sim_fee_ratio = env::var("SIM_FEE_RATIO")?.deref().apply(Amount::from_str)?;
-
-    let new_balances = simulate_trade(
-        speculators,
-        &currency_collection,
-        &market_collection,
-        &current_balances,
-        sim_fee_ratio,
-    )?;
-
     for (
         currency_id,
         Balance {
             available, pending, ..
         },
-    ) in new_balances.into_iter()
+    ) in current_balances.into_iter()
     {
-        let balance_id = get_sim_next_balance_id(sim_conn);
+        let balance_id = get_sim_next_balance_id(&balance_sim_conn);
         let balance = Balance::new(
             balance_id,
             currency_id,
-            latest_stamp.stamp_id,
+            latest_main_stamp.stamp_id,
             available,
             pending,
         );
-        insert_into(schema::balance::table)
+        if let Err(e) = insert_into(schema::balance::table)
             .values(balance)
-            .execute(sim_conn)?;
+            .execute(balance_sim_conn)
+        {
+            warn!(LOGGER, "Can't add new balance: {}", e);
+        }
     }
 
     Ok(())
+}
+
+fn batch() -> Result<()> {
+    let url = env::var("DATABASE_URL")?;
+    let conn = Conn::establish(&url)?;
+    let sim_url = env::var("SIM_DATABASE_URL")?;
+    let balance_sim_conn = Conn::establish(&sim_url)?;
+
+    let last_sim_stamp_id = schema::balance::table
+        .select(max(schema::balance::stamp_id))
+        .first::<Option<IdType>>(&balance_sim_conn)?;
+    let latest_main_stamp = get_latest_stamp(&conn)?;
+
+    match last_sim_stamp_id {
+        Some(id) if id == latest_main_stamp.stamp_id => {
+            Err(BoxErr::from("No new timestamp exists in main DB"))
+        }
+        Some(_) => simulate_trade(&conn, &balance_sim_conn, latest_main_stamp),
+        None => sync_balance(&conn, &balance_sim_conn, latest_main_stamp),
+    }
 }
 
 fn main() {
