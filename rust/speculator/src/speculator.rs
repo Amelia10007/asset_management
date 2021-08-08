@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use crate::rsi::{Duration, RsiHistory};
 use apply::Apply;
 use database::model::*;
+use itertools::Itertools;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IncompleteMyorder {
@@ -137,13 +138,18 @@ impl Speculator for MultipleRsiSpeculator {
         self.market.clone()
     }
 
-    fn update_market_state(&mut self, new_market_state: MarketState) {
+    fn update_market_state(&mut self, mut new_market_state: MarketState) {
         let timestamp = new_market_state.stamp.timestamp;
         let new_price = new_market_state.price.amount as f64;
 
         for rsi_history in self.rsi_histories.iter_mut() {
             rsi_history.update_price(timestamp, new_price);
         }
+
+        // Drop needless myorder data
+        new_market_state
+            .myorders
+            .retain(|order| order.state == OrderState::Opened);
 
         self.market_states.push(new_market_state);
     }
@@ -157,26 +163,44 @@ impl Speculator for MultipleRsiSpeculator {
             Some((OrderSide::Buy, reason)) => {
                 // Create buy order
                 let last_state = self.market_states.last().unwrap();
-                let order = make_limit_buy_order(
-                    &self.market,
-                    last_state,
-                    quote_balance,
-                    self.spend_balance_ratio,
-                );
-                let recommendation = OrderRecommendation::Open(order, reason);
-                vec![recommendation]
+                let quote_quantity = quote_balance.available * self.spend_balance_ratio / 2.0; // Seperate into limit and market
+                let limit_order = limit_buy_order(&self.market, last_state, quote_quantity);
+                let market_order = market_buy_order(&self.market, last_state, quote_quantity);
+                let opens = std::iter::once(limit_order)
+                    .chain(market_order)
+                    .map(|order| OrderRecommendation::Open(order, reason.clone()));
+
+                // Cancel sell order
+                let closes = last_state
+                    .myorders
+                    .iter()
+                    .filter(|myorder| myorder.side == OrderSide::Sell)
+                    .filter(|myorder| myorder.state == OrderState::Opened)
+                    .cloned()
+                    .map(|myorder| OrderRecommendation::Cancel(myorder, reason.clone()));
+
+                opens.chain(closes).collect()
             }
             Some((OrderSide::Sell, reason)) => {
                 // Create sell order
                 let last_state = self.market_states.last().unwrap();
-                let order = make_limit_sell_order(
-                    &self.market,
-                    last_state,
-                    base_balance,
-                    self.spend_balance_ratio,
-                );
-                let recommendation = OrderRecommendation::Open(order, reason);
-                vec![recommendation]
+                let base_quantity = base_balance.available * self.spend_balance_ratio / 2.0; // Seperate into limit and market
+                let limit_order = limit_sell_order(&self.market, last_state, base_quantity);
+                let market_order = market_sell_order(&self.market, last_state, base_quantity);
+                let opens = std::iter::once(limit_order)
+                    .chain(market_order)
+                    .map(|order| OrderRecommendation::Open(order, reason.clone()));
+
+                // Cancel buy order
+                let closes = last_state
+                    .myorders
+                    .iter()
+                    .filter(|myorder| myorder.side == OrderSide::Buy)
+                    .filter(|myorder| myorder.state == OrderState::Opened)
+                    .cloned()
+                    .map(|myorder| OrderRecommendation::Cancel(myorder, reason.clone()));
+
+                opens.chain(closes).collect()
             }
             None => {
                 vec![]
@@ -233,13 +257,100 @@ fn recommend_side_by_rsi(rsi_history: &RsiHistory) -> SideRecommendation {
     }
 }
 
-fn make_limit_buy_order(
+fn market_buy_order(
     market: &Market,
     market_state: &MarketState,
-    quote_balance: &Balance,
-    spend_balance_ratio: Amount,
+    quote_quantity: Amount,
+) -> Option<IncompleteMyorder> {
+    let average_price = {
+        let sell_books = market_state
+            .orderbooks
+            .iter()
+            .filter(|book| book.side == OrderSide::Sell)
+            .filter(|book| !book.price.is_nan())
+            .sorted_by(|b1, b2| b1.price.partial_cmp(&b2.price).unwrap());
+        let mut baught_quantity = 0.0;
+        let mut remaining_quantity = quote_quantity;
+        let mut weighted_price_sum = 0.0;
+        for Orderbook { price, volume, .. } in sell_books {
+            let q = remaining_quantity.min(*volume);
+            baught_quantity += q;
+            remaining_quantity -= q;
+            weighted_price_sum += q * price;
+            if q <= Amount::MIN_POSITIVE {
+                break;
+            }
+        }
+
+        weighted_price_sum / baught_quantity
+    };
+
+    if average_price / market_state.price.amount < 1.01 {
+        let base_quantity = quote_quantity / average_price;
+        let order = IncompleteMyorder {
+            market_id: market.market_id,
+            price: average_price,
+            base_quantity,
+            quote_quantity,
+            side: OrderSide::Buy,
+            order_type: OrderType::Market,
+        };
+        Some(order)
+    } else {
+        None
+    }
+}
+
+fn market_sell_order(
+    market: &Market,
+    market_state: &MarketState,
+    base_quantity: Amount,
+) -> Option<IncompleteMyorder> {
+    let average_price = {
+        let sell_books = market_state
+            .orderbooks
+            .iter()
+            .filter(|book| book.side == OrderSide::Buy)
+            .filter(|book| !book.price.is_nan())
+            .sorted_by(|b1, b2| b1.price.partial_cmp(&b2.price).unwrap())
+            .rev();
+        let mut sold_quantity = 0.0;
+        let mut remaining_quantity = base_quantity;
+        let mut weighted_price_sum = 0.0;
+        for Orderbook { price, volume, .. } in sell_books {
+            let q = remaining_quantity.min(*volume);
+            sold_quantity += q;
+            remaining_quantity -= q;
+            weighted_price_sum += q * price;
+            if q <= Amount::MIN_POSITIVE {
+                break;
+            }
+        }
+
+        weighted_price_sum / sold_quantity
+    };
+
+    if average_price / market_state.price.amount > 0.99 {
+        let quote_quantity = base_quantity * average_price;
+        let order = IncompleteMyorder {
+            market_id: market.market_id,
+            price: average_price,
+            base_quantity,
+            quote_quantity,
+            side: OrderSide::Buy,
+            order_type: OrderType::Market,
+        };
+        Some(order)
+    } else {
+        None
+    }
+}
+
+fn limit_buy_order(
+    market: &Market,
+    market_state: &MarketState,
+    quote_quantity: Amount,
 ) -> IncompleteMyorder {
-    let quote_quantity = quote_balance.available * spend_balance_ratio;
     let price = market_state.price.amount * 1.001;
     let base_quantity = quote_quantity / price;
 
@@ -255,13 +366,11 @@ fn make_limit_buy_order(
     order
 }
 
-fn make_limit_sell_order(
+fn limit_sell_order(
     market: &Market,
     market_state: &MarketState,
-    base_balance: &Balance,
-    spend_balance_ratio: Amount,
+    base_quantity: Amount,
 ) -> IncompleteMyorder {
-    let base_quantity = base_balance.available * spend_balance_ratio;
     let price = market_state.price.amount * 0.999;
     let quote_quantity = base_quantity * price;
 
