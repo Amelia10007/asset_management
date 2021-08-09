@@ -337,7 +337,7 @@ fn market_sell_order(
             price: average_price,
             base_quantity,
             quote_quantity,
-            side: OrderSide::Buy,
+            side: OrderSide::Sell,
             order_type: OrderType::Market,
         };
         Some(order)
