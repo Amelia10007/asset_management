@@ -31,17 +31,20 @@ impl Rsi {
     }
 
     fn from_changes(changes: impl IntoIterator<Item = PriceChange>) -> Option<Self> {
-        let mut increase = 0.0;
-        let mut decrease = 0.0;
-        for change in changes.into_iter() {
-            match change {
-                PriceChange::Increase(c) => increase += c,
-                PriceChange::Decrease(c) => decrease += c,
-            }
-        }
+        let (increase, decrease, count) =
+            changes
+                .into_iter()
+                .fold(
+                    (0.0, 0.0, 0),
+                    |(acc_inc, acc_dec, acc_count), change| match change {
+                        PriceChange::Increase(c) => (acc_inc + c, acc_dec, acc_count + 1),
+                        PriceChange::Decrease(c) => (acc_inc, acc_dec + c, acc_count + 1),
+                    },
+                );
 
         let rsi = increase / (increase + decrease);
-        if rsi.is_finite() {
+        // RSI should be calculated by using long history to a certain extent
+        if rsi.is_finite() && count >= 20 {
             Some(Rsi { rsi })
         } else {
             None
