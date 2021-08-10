@@ -99,12 +99,19 @@ pub trait Speculator {
         quote_balance: &Balance,
     ) -> Vec<OrderRecommendation>;
 
-    fn filter_orderbooks(&self, orderbooks: &mut Vec<Orderbook>) {
-        orderbooks.retain(|o| o.market_id == self.market().market_id)
-    }
+    fn is_valid_market_state(&self, market_state: &MarketState) -> bool {
+        let market_id = self.market().market_id;
+        let price_cond = market_state.price.market_id == market_id;
+        let orderbooks_cond = market_state
+            .orderbooks
+            .iter()
+            .all(|o| o.market_id == market_id);
+        let myorders_cond = market_state
+            .myorders
+            .iter()
+            .all(|o| o.market_id == market_id);
 
-    fn filter_myorders(&self, myorders: &mut Vec<MyOrder>) {
-        myorders.retain(|m| m.market_id == self.market().market_id)
+        price_cond && orderbooks_cond && myorders_cond
     }
 }
 
@@ -139,6 +146,9 @@ impl Speculator for MultipleRsiSpeculator {
     }
 
     fn update_market_state(&mut self, mut new_market_state: MarketState) {
+        // Deny other market's data
+        assert!(self.is_valid_market_state(&new_market_state));
+
         let timestamp = new_market_state.stamp.timestamp;
         let new_price = new_market_state.price.amount as f64;
 
@@ -146,7 +156,7 @@ impl Speculator for MultipleRsiSpeculator {
             rsi_history.update_price(timestamp, new_price);
         }
 
-        // Drop needless myorder data
+        // Drop needless myorder data for RSI-based speculation
         new_market_state
             .myorders
             .retain(|order| order.state == OrderState::Opened);
