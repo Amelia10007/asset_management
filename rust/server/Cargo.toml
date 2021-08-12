@@ -12,7 +12,9 @@ database = { path = "../database" }
 dotenv = "*"
 apply = "*"
 hyper = { version = "*", features = ["full"] }
+itertools = "*"
 iter_vals = "*"
+json = "*"
 once_cell = "*"
 rayon = "*"
 templar = "0.4.2"

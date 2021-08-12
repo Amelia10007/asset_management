@@ -13,10 +13,13 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use templar::*;
 
+mod api;
 mod exchange_graph;
 mod template_render;
 
 use template_render::*;
+
+use crate::api::api_balance_history;
 
 pub type HttpQuery<'a> = common::http_query::HttpQuery<&'a str, &'a str>;
 
@@ -50,7 +53,10 @@ impl<'a> ContentType<'a> {
 
         if path.starts_with("api/") {
             let api_path = &path["api/".len()..];
-            Err(BoxErr::from(format!("Invalid api path: {}", api_path)))
+            match api_path {
+                "balance_history" => Ok(ApiCall(query, api_balance_history)),
+                _ => Err(BoxErr::from(format!("Invalid api path: {}", api_path))),
+            }
         } else if path.contains(".template.html") {
             let path = path.to_string();
             match path.as_str().trim_end_matches(".template.html") {
@@ -61,7 +67,7 @@ impl<'a> ContentType<'a> {
         } else {
             let is_safe_path = path
                 .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-');
             if is_safe_path {
                 Ok(Static(path))
             } else {
