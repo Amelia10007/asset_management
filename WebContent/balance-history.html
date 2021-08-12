@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Total balance</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.2/Chart.bundle.js"></script>
+    <script src="https://unpkg.com/chartjs-plugin-colorschemes"></script>
+    <script src="balance-history.js"></script>
+    <script src="chart-plugin.js"></script>
+    <script src="header_footer.js"></script>
+</head>
+
+<body>
+
+    <div id="header"></div>
+
+    <form name="select">
+        Show
+        <input id="since" type="date">
+        ~
+        <input id="until" type="date">
+        Step
+        <select id="step">
+            <option value="1_hour">1h</option>
+            <option value="4_hour">4h</option>
+            <option value="1_day">1 Day</option>
+        </select>
+        use simulation balance:
+        <input id="sim" type="checkbox">
+        <input type="button" class="button" value="Update" onclick="loadBalanceHistory()">
+        <input type="button" class="button" value="Reset" onclick="resetForm()">
+    </form>
+
+    <hr>
+
+    <canvas id="balanceChart"></canvas>
+
+    <div id="footer"></div>
+</body>
+
+</html>

@@ -13,6 +13,23 @@ table {
     margin-right: auto;
 }
 
+.button {
+    display: inline-block;
+    width: 200px;
+    height: 54px;
+    text-align: center;
+    text-decoration: none;
+    line-height: 54px;
+    outline: none;
+}
+.button {
+    background-color: #333;
+    color: #fff;
+}
+.button:hover {
+    background-color: #59b1eb;
+}
+
 body {
    text-align: center;
 }
