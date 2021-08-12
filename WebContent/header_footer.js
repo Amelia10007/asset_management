@@ -1,6 +1,4 @@
-
-
-window.onload = () => {
+const loadHeaderFooter = () => {
 
     const headerPos = document.getElementById('header');
     const footerPos = document.getElementById('footer');
@@ -16,3 +14,5 @@ window.onload = () => {
     headerRequest.send();
     footerRequest.send();
 };
+
+window.addEventListener("load", () => loadHeaderFooter());
