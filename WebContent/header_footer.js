@@ -3,16 +3,12 @@ const loadHeaderFooter = () => {
     const headerPos = document.getElementById('header');
     const footerPos = document.getElementById('footer');
 
-    const headerRequest = new XMLHttpRequest();
-    headerRequest.open('GET', '/header.html');
-    headerRequest.onload = () => headerPos.insertAdjacentHTML('afterbegin', headerRequest.response);
-
-    const footerRequest = new XMLHttpRequest();
-    footerRequest.open('GET', '/footer.html');
-    footerRequest.onload = () => footerPos.insertAdjacentHTML('afterbegin', footerRequest.response);
-
-    headerRequest.send();
-    footerRequest.send();
+    fetch('header.html')
+        .then(response => response.text())
+        .then(text => headerPos.insertAdjacentHTML('afterbegin', text));
+    fetch('footer.html')
+        .then(response => response.text())
+        .then(text => footerPos.insertAdjacentHTML('afterbegin', text));
 };
 
 window.addEventListener("load", () => loadHeaderFooter());
