@@ -97,7 +97,7 @@ const renderBalances = (json) => {
 const resetForm = () => {
     const since = new Date();
     const until = new Date();
-    since.setDate(since.getDate() - 30);
+    since.setMonth(since.getMonth() - 1);
 
     document.getElementById('since').valueAsDate = since;
     document.getElementById('until').valueAsDate = until;
