@@ -1,4 +1,6 @@
 
+let previousChart = null;
+
 const loadCurrentBalances = () => {
     const fiat = 'USDT';
     let queryStr = '?fiat=' + fiat;
@@ -41,8 +43,14 @@ const renderBalances = (json) => {
         }
     }
 
+    // Clear previous chart
+    if (previousChart != null) {
+        previousChart.destroy();
+        console.log('Deleted previous chart');
+    }
+
     const ctx = document.getElementById('balanceChart').getContext('2d');
-    const chart = new Chart(ctx, {
+    previousChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels: labels,

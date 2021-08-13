@@ -1,4 +1,6 @@
 
+let previousChart = null;
+
 const loadBalanceHistory = () => {
     const until = new Date();
     const since = new Date();
@@ -56,10 +58,15 @@ const renderBalances = (json) => {
         totalBalanceSums.push(totalBalanceSum);
     }
 
+    // Clear previous chart
+    if (previousChart != null) {
+        previousChart.destroy();
+        console.log('Deleted previous chart');
+    }
+
     const canvas = document.getElementById('balanceChart');
     const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const chart = new Chart(ctx, {
+    previousChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: labels,
