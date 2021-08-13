@@ -46,7 +46,6 @@ const renderBalances = (json) => {
     // Clear previous chart
     if (previousChart != null) {
         previousChart.destroy();
-        console.log('Deleted previous chart');
     }
 
     const ctx = document.getElementById('balanceChart').getContext('2d');
