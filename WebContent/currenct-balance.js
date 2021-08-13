@@ -1,7 +1,11 @@
 
-const loadCurrenctBalances = () => {
+const loadCurrentBalances = () => {
     const fiat = 'USDT';
-    const queryStr = '?fiat=' + fiat;
+    let queryStr = '?fiat=' + fiat;
+    if (document.getElementById('sim').checked) {
+        queryStr += '&sim=1';
+    }
+
     const url = '/api/balance_history' + queryStr;
 
     fetch(url)
@@ -65,4 +69,4 @@ const renderBalances = (json) => {
     });
 };
 
-window.onload = () => loadCurrenctBalances();
+window.addEventListener("load", () => loadCurrentBalances());

@@ -15,9 +15,13 @@
 
     <div id="header"></div>
 
-    <canvas id="balanceChart"></canvas>
+    <form name="select">
+        use simulation balance:
+        <input id="sim" type="checkbox">
+        <input type="button" class="button" value="Update" onclick="loadCurrentBalances()">
+    </form>
 
-    <input type="button" value="Reload" onclick="loadCurrenctBalances()">
+    <canvas id="balanceChart"></canvas>
 
     <div id="footer"></div>
 </body>
