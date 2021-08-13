@@ -2,10 +2,6 @@
 let previousChart = null;
 
 const loadBalanceHistory = () => {
-    const until = new Date();
-    const since = new Date();
-    since.setDate(since.getDate() - 30);
-
     const fiat = 'USDT';
 
     let queryStr = '?';
