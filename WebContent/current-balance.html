@@ -9,6 +9,7 @@
     <script src="https://unpkg.com/chartjs-plugin-colorschemes"></script>
     <script src="current-balance.js"></script>
     <script src="chart-plugin.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/darkmode-js@1.5.7/lib/darkmode-js.min.js"></script>
 </head>
 
 <body>
@@ -21,9 +22,17 @@
         <input type="button" class="button" value="Update" onclick="loadCurrentBalances()">
     </form>
 
-    <canvas id="balanceChart"></canvas>
+    <hr>
+
+    <div id="balanceChartHolder">
+        <canvas id="balanceChart"></canvas>
+    </div>
 
     <div id="footer"></div>
+
+    <script>
+        new Darkmode().showWidget();
+    </script>
 </body>
 
 </html>
