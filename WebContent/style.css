@@ -30,6 +30,12 @@ table {
     background-color: #59b1eb;
 }
 
+#balanceChartHolder{
+    margin: auto;
+    width: 80%;
+    height: 80%;
+}
+
 body {
-   text-align: center;
+    text-align: center;
 }
