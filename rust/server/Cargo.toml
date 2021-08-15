@@ -17,5 +17,4 @@ iter_vals = "*"
 json = "*"
 once_cell = "*"
 rayon = "*"
-templar = "0.4.2"
 tokio = { version = "*", features = ["full"] }

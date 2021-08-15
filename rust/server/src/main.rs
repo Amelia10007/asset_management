@@ -11,13 +11,9 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use templar::*;
 
 mod api;
 mod exchange_graph;
-mod template_render;
-
-use template_render::*;
 
 use crate::api::api_balance_history;
 
@@ -39,7 +35,6 @@ static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
 
 enum ContentType<'a> {
     Static(&'a str),
-    Template(String, HttpQuery<'a>, fn(HttpQuery<'a>) -> Result<Document>),
     ApiCall(HttpQuery<'a>, fn(HttpQuery<'a>) -> Result<String>),
 }
 
@@ -56,13 +51,6 @@ impl<'a> ContentType<'a> {
             match api_path {
                 "balance_history" => Ok(ApiCall(query, api_balance_history)),
                 _ => Err(BoxErr::from(format!("Invalid api path: {}", api_path))),
-            }
-        } else if path.contains(".template.html") {
-            let path = path.to_string();
-            match path.as_str().trim_end_matches(".template.html") {
-                "balance_current" => Ok(Template(path, query, render_balance_current)),
-                "balance_history" => Ok(Template(path, query, render_balance_history)),
-                _ => Err(BoxErr::from(format!("Invalid app path: {}", path))),
             }
         } else {
             let is_safe_path = path
@@ -81,26 +69,12 @@ impl<'a> ContentType<'a> {
 
         match self {
             Static(path) => read_bytes_from_file(path).map_err(Into::into),
-            Template(path, query, f) => {
-                let template_param = f(query)?;
-
-                let template_content = read_string_from_file(path)?;
-                let template = Templar::global().parse(&template_content)?;
-
-                let context = StandardContext::new();
-                context.set(template_param)?;
-
-                let rendered = template.render(&context)?;
-                Ok(rendered.into_bytes())
-            }
             ApiCall(query, f) => f(query).map(String::into_bytes),
         }
     }
 }
 
 async fn handle(req: Request<Body>) -> Result<Response<Body>> {
-    dotenv::dotenv().ok();
-
     let content = match ContentType::parse_uri(req.uri()).and_then(ContentType::render) {
         Ok(content) => content,
         Err(e) => {
@@ -126,12 +100,6 @@ fn read_bytes_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
 
     file.read_to_end(&mut bytes)?;
     Ok(bytes)
-}
-
-fn read_string_from_file<P: AsRef<Path>>(path: P) -> Result<String> {
-    read_bytes_from_file(path)?
-        .apply(String::from_utf8)
-        .map_err(Into::into)
 }
 
 #[tokio::main]
