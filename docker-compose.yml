@@ -1,0 +1,25 @@
+# `$ docker-compose up` in this directory to launch
+version: "3"
+services:
+  autotrader_db:
+    build:
+      context: .
+      dockerfile: ./DB.Dockerfile
+    container_name: autotrader_db
+    tty: true
+    networks:
+      - default
+    ports:
+      - 3306:3306
+  autotrader_app:
+    build:
+      context: .
+      dockerfile: ./App.Dockerfile
+    container_name: autotrader_app
+    tty: true
+    networks:
+      - default
+    ports:
+      - 8080:8080
+    links:
+      - autotrader_db:autotrader_db
