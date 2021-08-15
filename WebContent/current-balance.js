@@ -60,7 +60,7 @@ const renderBalances = (json) => {
         options: {
             title: {
                 display: true,
-                text: 'Total balance'
+                text: 'Total balance at ' + stamp
             },
             plugins: {
                 colorschemes: {
