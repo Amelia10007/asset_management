@@ -1,9 +1,10 @@
-use apply::Apply;
+use apply::{Also, Apply};
 use common::alias::{BoxErr, Result};
 use common::log::prelude::*;
 use hyper::server::Server;
 use hyper::service::*;
 use hyper::{Body, Request, Response, Uri};
+use json::JsonValue;
 use once_cell::sync::Lazy;
 use std::env;
 use std::io::{stdout, Read, Stdout};
@@ -35,7 +36,7 @@ static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
 
 enum ContentType<'a> {
     Static(&'a str),
-    ApiCall(HttpQuery<'a>, fn(HttpQuery<'a>) -> Result<String>),
+    ApiCall(HttpQuery<'a>, fn(HttpQuery<'a>) -> Result<JsonValue>),
 }
 
 impl<'a> ContentType<'a> {
@@ -64,22 +65,38 @@ impl<'a> ContentType<'a> {
         }
     }
 
-    pub fn render(self) -> Result<Vec<u8>> {
+    pub fn render(self) -> Vec<u8> {
         use ContentType::*;
 
         match self {
-            Static(path) => read_bytes_from_file(path).map_err(Into::into),
-            ApiCall(query, f) => f(query).map(String::into_bytes),
+            Static(path) => match read_bytes_from_file(path) {
+                Ok(content) => content,
+                Err(e) => {
+                    warn!(LOGGER, "Failed to load static file {}: {}", path, e);
+                    "<html><body>An error occurred during dealing with http request <a href=\"index.html\">index</a></body></html>"
+                    .as_bytes().to_vec()
+                }
+            },
+            ApiCall(query, f) => {
+                let json = match f(query) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        warn!(LOGGER, "API failure: {}", e);
+                        JsonValue::new_object().also(|json| json["success"] = false.into())
+                    }
+                };
+                json.to_string().into_bytes()
+            }
         }
     }
 }
 
 async fn handle(req: Request<Body>) -> Result<Response<Body>> {
-    let content = match ContentType::parse_uri(req.uri()).and_then(ContentType::render) {
+    let content = match ContentType::parse_uri(req.uri()).map(ContentType::render) {
         Ok(content) => content,
         Err(e) => {
             warn!(LOGGER, "{}", e);
-            "<html><body>An error occurred during dealing with http request <a href=\"index.html\">index</a></body></html>"
+            "<html><body>An error occurred during parsing http request <a href=\"index.html\">index</a></body></html>"
             .as_bytes().to_vec()
         }
     };

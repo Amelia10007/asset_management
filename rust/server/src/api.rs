@@ -21,7 +21,7 @@ use std::rc::Rc;
 
 type Duration = <NaiveDateTime as Sub>::Output;
 
-pub fn api_balance_history(query: HttpQuery<'_>) -> Result<String> {
+pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
     let (price_conn, balance_conn, _) = connect_db(&query)?;
 
     let timestamps = {
@@ -116,7 +116,7 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<String> {
     }
     json["history"] = history_array;
 
-    Ok(json.to_string())
+    Ok(json)
 }
 
 /// # Returns
