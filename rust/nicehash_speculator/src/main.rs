@@ -99,8 +99,8 @@ fn construct_speculators(
 ) -> Result<Vec<(Currency, Currency, MultipleRsiSpeculator)>> {
     let rsi_timespans = env::var("RSI_TIMESPAN_MINUTES")?
         .apply_ref(|minutes_str| parse_rsi_timespans(minutes_str))?;
-    let spend_balance_ratio =
-        env::var("SIM_SPEND_BALANCE_RATIO")?.apply(|s| Amount::from_str(&s))?;
+    let spend_buy_ratio = env::var("SIM_SPEND_BUY_RATIO")?.apply(|s| Amount::from_str(&s))?;
+    let spend_sell_ratio = env::var("SIM_SPEND_SELL_RATIO")?.apply(|s| Amount::from_str(&s))?;
 
     let longest_timespan = rsi_timespans
         .iter()
@@ -138,8 +138,12 @@ fn construct_speculators(
             }?;
             debug!(LOGGER, "Use {} price-stamp pairs", price_stamps.len());
 
-            let mut speculator =
-                MultipleRsiSpeculator::new(market, rsi_timespans.clone(), spend_balance_ratio);
+            let mut speculator = MultipleRsiSpeculator::new(
+                market,
+                rsi_timespans.clone(),
+                spend_buy_ratio,
+                spend_sell_ratio,
+            );
             for (price, stamp) in price_stamps.into_iter() {
                 let orderbooks = schema::orderbook::table
                     .filter(schema::orderbook::stamp_id.eq(stamp.stamp_id))

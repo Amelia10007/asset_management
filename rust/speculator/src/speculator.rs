@@ -121,11 +121,17 @@ pub struct MultipleRsiSpeculator {
     market_states: Vec<MarketState>,
     // RSI ordered by timespan descending
     rsi_histories: Vec<RsiHistory>,
-    spend_balance_ratio: Amount,
+    spend_buy_ratio: Amount,
+    spend_sell_ratio: Amount,
 }
 
 impl MultipleRsiSpeculator {
-    pub fn new(market: Market, rsi_timespans: Vec<Duration>, spend_balance_ratio: Amount) -> Self {
+    pub fn new(
+        market: Market,
+        rsi_timespans: Vec<Duration>,
+        spend_buy_ratio: Amount,
+        spend_sell_ratio: Amount,
+    ) -> Self {
         let rsi_histories = rsi_timespans
             .into_iter()
             .map(|span| RsiHistory::new(span))
@@ -135,7 +141,8 @@ impl MultipleRsiSpeculator {
             market,
             market_states: vec![],
             rsi_histories,
-            spend_balance_ratio,
+            spend_buy_ratio,
+            spend_sell_ratio,
         }
     }
 }
@@ -173,7 +180,7 @@ impl Speculator for MultipleRsiSpeculator {
             Some((OrderSide::Buy, reason)) => {
                 // Create buy order
                 let last_state = self.market_states.last().unwrap();
-                let quote_quantity = quote_balance.available * self.spend_balance_ratio / 2.0; // Seperate into limit and market
+                let quote_quantity = quote_balance.available * self.spend_buy_ratio / 2.0; // Seperate into limit and market
                 let limit_order = limit_buy_order(&self.market, last_state, quote_quantity);
                 let market_order = market_buy_order(&self.market, last_state, quote_quantity);
                 let opens = std::iter::once(limit_order)
@@ -194,7 +201,7 @@ impl Speculator for MultipleRsiSpeculator {
             Some((OrderSide::Sell, reason)) => {
                 // Create sell order
                 let last_state = self.market_states.last().unwrap();
-                let base_quantity = base_balance.available * self.spend_balance_ratio / 2.0; // Seperate into limit and market
+                let base_quantity = base_balance.available * self.spend_sell_ratio / 2.0; // Seperate into limit and market
                 let limit_order = limit_sell_order(&self.market, last_state, base_quantity);
                 let market_order = market_sell_order(&self.market, last_state, base_quantity);
                 let opens = std::iter::once(limit_order)
