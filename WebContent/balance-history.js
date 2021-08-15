@@ -30,7 +30,6 @@ const renderBalances = (json) => {
 
     const labels = [];
     const totalBalanceSums = [];
-    const datasets = [];
 
     for (key in json['history']) {
         const h = json['history'][key];
