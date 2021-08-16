@@ -15,8 +15,6 @@ const loadBalanceHistory = () => {
 
     const url = '/api/balance_history' + queryStr;
 
-    console.log(url);
-
     fetch(url)
         .then(response => response.json())
         .then(json => renderBalances(json));
