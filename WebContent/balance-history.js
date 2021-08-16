@@ -15,8 +15,6 @@ const loadBalanceHistory = () => {
 
     const url = '/api/balance_history' + queryStr;
 
-    console.log(url);
-
     fetch(url)
         .then(response => response.json())
         .then(json => renderBalances(json));
@@ -90,8 +88,11 @@ const renderBalances = (json) => {
 };
 
 const resetForm = () => {
-    const since = new Date();
+    // To show today's history, 'until' should be tomorrow
     const until = new Date();
+    until.setDate(until.getDate() + 1);
+    // Show history during a month
+    const since = new Date();
     since.setMonth(since.getMonth() - 1);
 
     document.getElementById('since').valueAsDate = since;
