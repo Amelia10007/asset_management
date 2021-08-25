@@ -9,11 +9,11 @@ started=$(date)
 echo "scraping batch started at ${started}" >> $LOG_DIR/log.log
 
 pushd ../rust/nicehash_scraper
-../target/debug/nicehash_scraper >> $LOG_DIR/scraper.log 2>&1
+../target/release/nicehash_scraper >> $LOG_DIR/scraper.log 2>&1
 popd
 
 pushd ../rust/nicehash_speculator
-../target/debug/nicehash_speculator >> $LOG_DIR/speculator.log 2>&1
+../target/release/nicehash_speculator >> $LOG_DIR/speculator.log 2>&1
 popd
 
 finished=$(date)
