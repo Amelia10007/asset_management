@@ -137,6 +137,13 @@ fn main() {
             return;
         }
     };
+    let market_collection = match list_markets(&conn) {
+        Ok(markets) => markets,
+        Err(e) => {
+            error!(LOGGER, "Cant list markets from DB: {}", e);
+            return;
+        }
+    };
 
     // Fetch balance info from remote server
     if let Ok("1") = env::var("FETCH_BALANCE_FROM_REMOTE_SERVER").as_deref() {
@@ -180,13 +187,6 @@ fn main() {
 
     // Fetch market info from remote server
     if let Ok("1") = env::var("FETCH_MARKET_AND_PRICE_FROM_REMOTE_SERVER").as_deref() {
-        let known_markets = match list_markets(&conn) {
-            Ok(markets) => markets,
-            Err(e) => {
-                error!(LOGGER, "Cant list markets from DB: {}", e);
-                return;
-            }
-        };
         match nicehash::fetch_all_market_prices(&known_symbols) {
             Ok(market_prices) => market_prices
                 .iter()
@@ -198,20 +198,21 @@ fn main() {
                 })
                 .for_each(|(base, quote, price)| {
                     // Get market. Add market if necessary
-                    let market =
-                        match known_markets.by_base_quote_id(base.currency_id, quote.currency_id) {
-                            Some(market) => market.clone(),
-                            None => match add_market(&conn, base.currency_id, quote.currency_id) {
-                                Ok(market) => {
-                                    info!(LOGGER, "Add market: {}/{}", base.symbol, quote.symbol);
-                                    market
-                                }
-                                Err(e) => {
-                                    warn!(LOGGER, "Can't add currency: {}", e);
-                                    return;
-                                }
-                            },
-                        };
+                    let market = match market_collection
+                        .by_base_quote_id(base.currency_id, quote.currency_id)
+                    {
+                        Some(market) => market.clone(),
+                        None => match add_market(&conn, base.currency_id, quote.currency_id) {
+                            Ok(market) => {
+                                info!(LOGGER, "Add market: {}/{}", base.symbol, quote.symbol);
+                                market
+                            }
+                            Err(e) => {
+                                warn!(LOGGER, "Can't add currency: {}", e);
+                                return;
+                            }
+                        },
+                    };
                     // Add price
                     match add_price(&conn, market.market_id, stamp.stamp_id, price) {
                         Ok(price) => {
@@ -271,6 +272,38 @@ fn main() {
             }
         }
         Err(e) => warn!(LOGGER, "Can't list orderbook-fetch target markets: {}", e),
+    }
+
+    // Update opened my orders
+    match nicehash::fetch_opened_myorders(
+        api_key.clone(),
+        &conn,
+        &currency_collection,
+        &market_collection,
+    ) {
+        Ok(myorders) => myorders.into_iter().for_each(|(market, myorder)| {
+            match add_or_update_myorder(
+                &conn,
+                myorder.transaction_id.clone(),
+                market.market_id,
+                stamp.stamp_id,
+                myorder.price,
+                myorder.base_quantity,
+                myorder.quote_quantity,
+                myorder.order_type,
+                myorder.side,
+                myorder.state,
+            ) {
+                Ok(_) => debug!(
+                    LOGGER,
+                    "Add or update myorder transaction: {}", myorder.transaction_id
+                ),
+                Err(e) => {
+                    warn!(LOGGER, "Can't add or update myorder: {}", e)
+                }
+            }
+        }),
+        Err(e) => warn!(LOGGER, "Can't fetch opned myorders from local DB: {}", e),
     }
 
     // Add target markets' my orders

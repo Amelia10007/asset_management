@@ -3,7 +3,10 @@ pub mod api_common;
 use api_common::*;
 use apply::Apply;
 use common::alias::Result;
+use database::diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
+use database::logic::{Conn, CurrencyCollection, MarketCollection};
 use database::model::*;
+use database::schema;
 use json::JsonValue;
 use std::str::FromStr;
 
@@ -207,25 +210,39 @@ pub fn fetch_myorders<S: AsRef<str>>(
         .call()?;
 
     json.members()
-        .filter_map(|myorder_json| {
-            let transaction_id = myorder_json["orderId"].as_str()?;
-            let price = myorder_json["price"].as_f32()?;
-            let base_quantity = myorder_json["origQty"].as_f32()?;
-            let quote_quantity = myorder_json["origSndQty"].as_f32()?;
-            let order_type = myorder_json["type"].as_str().and_then(get_order_type)?;
-            let side = myorder_json["side"].as_str().and_then(get_order_side)?;
-            let state = myorder_json["state"].as_str().and_then(get_myorder_state)?;
+        .filter_map(|json| parse_myorder_json(&json))
+        .collect::<Vec<_>>()
+        .apply(Ok)
+}
 
-            let myorder = IncompleteMyorder {
-                transaction_id: transaction_id.to_string(),
-                price,
-                base_quantity,
-                quote_quantity,
-                order_type,
-                side,
-                state,
-            };
-            Some(myorder)
+pub fn fetch_opened_myorders<'m>(
+    api_key: ApiKey,
+    conn: &Conn,
+    currency_collection: &CurrencyCollection,
+    market_collection: &'m MarketCollection,
+) -> Result<Vec<(&'m Market, IncompleteMyorder)>> {
+    let opened_myorders = schema::myorder::table
+        .filter(schema::myorder::state.eq(OrderState::Opened))
+        .load::<MyOrder>(conn)?;
+
+    opened_myorders
+        .into_iter()
+        .filter_map(|myorder| {
+            let market = market_collection.by_id(myorder.market_id)?;
+            let base = currency_collection.by_id(market.base_id)?;
+            let quote = currency_collection.by_id(market.quote_id)?;
+            let symbol = get_market_symbol(&base.symbol, &quote.symbol);
+            let query = vec![("market", symbol), ("orderId", myorder.transaction_id)];
+            let json = ApiCallBuilder::new()
+                .private_api()
+                .method(Method::GET)
+                .path("/exchange/api/v2/info/myOrder")
+                .query(query)
+                .api_key(api_key.clone())
+                .call()
+                .ok()?;
+            let myorder = parse_myorder_json(&json)?;
+            Some((market, myorder))
         })
         .collect::<Vec<_>>()
         .apply(Ok)
@@ -266,4 +283,25 @@ fn get_myorder_state<S: AsRef<str>>(s: S) -> Option<OrderState> {
         | "CANCELLED_ERROR" | "REJECTED" => Some(OrderState::Error),
         _ => None,
     }
+}
+
+fn parse_myorder_json(json: &JsonValue) -> Option<IncompleteMyorder> {
+    let transaction_id = json["orderId"].as_str()?;
+    let price = json["price"].as_f32()?;
+    let base_quantity = json["origQty"].as_f32()?;
+    let quote_quantity = json["origSndQty"].as_f32()?;
+    let order_type = json["type"].as_str().and_then(get_order_type)?;
+    let side = json["side"].as_str().and_then(get_order_side)?;
+    let state = json["state"].as_str().and_then(get_myorder_state)?;
+
+    let myorder = IncompleteMyorder {
+        transaction_id: transaction_id.to_string(),
+        price,
+        base_quantity,
+        quote_quantity,
+        order_type,
+        side,
+        state,
+    };
+    Some(myorder)
 }
