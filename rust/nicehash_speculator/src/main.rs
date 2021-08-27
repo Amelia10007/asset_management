@@ -1,3 +1,4 @@
+use apply::Also;
 use apply::Apply;
 use common::alias::BoxErr;
 use common::alias::Result;
@@ -14,6 +15,7 @@ use speculator::rsi::Duration;
 use speculator::speculator::{MarketState, MultipleRsiSpeculator, Speculator};
 use std::collections::HashMap;
 use std::env;
+use std::hash::Hash;
 use std::io::{stdout, Stdout};
 use std::ops::Deref;
 use std::str::FromStr;
@@ -31,6 +33,23 @@ static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
     };
     Logger::new(stdout(), level)
 });
+
+fn group_by<V, K, F>(iter: impl IntoIterator<Item = V>, mut f: F) -> HashMap<K, Vec<V>>
+where
+    K: Eq + Hash,
+    V: Clone,
+    F: FnMut(&V) -> K,
+{
+    let mut map = HashMap::new();
+    for v in iter.into_iter() {
+        let key = f(&v);
+        map.entry(key)
+            .and_modify(|vec: &mut Vec<V>| vec.push(v.clone()))
+            .or_insert_with(|| vec![v]);
+    }
+
+    map
+}
 
 fn sync_balance(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp) -> Result<()> {
     let balances = schema::balance::table
@@ -102,41 +121,69 @@ fn construct_speculators(
     let spend_buy_ratio = env::var("SIM_SPEND_BUY_RATIO")?.apply(|s| Amount::from_str(&s))?;
     let spend_sell_ratio = env::var("SIM_SPEND_SELL_RATIO")?.apply(|s| Amount::from_str(&s))?;
 
-    let longest_timespan = rsi_timespans
-        .iter()
-        .max()
-        .copied()
-        .ok_opt("At least one rsi-timespan is required")?;
-    // Twice timespan is required to obtain RSIs in the specified timespan
-    let rsi_oldest_stamp = latest_main_stamp.timestamp - longest_timespan * 2;
-
     let market_symbols = env::var("SPECULATOR_TARGET_MARKETS")?;
     let target_markets =
         parse_market_symbols(&market_symbols, currency_collection, market_collection);
-    debug!(
-        LOGGER,
-        "Oldest stamp within RSI window: {}", rsi_oldest_stamp
-    );
 
+    // Load RSI-target timestamps
+    let stamps = {
+        let longest_timespan = rsi_timespans
+            .iter()
+            .max()
+            .copied()
+            .ok_opt("At least one rsi-timespan is required")?;
+        // Twice timespan is required to obtain RSIs in the specified timespan
+        let rsi_oldest_timestamp = latest_main_stamp.timestamp - longest_timespan * 2;
+        schema::stamp::table
+            .filter(schema::stamp::timestamp.ge(rsi_oldest_timestamp))
+            .order_by(schema::stamp::timestamp.asc())
+            .load::<Stamp>(conn)?
+    };
+    let oldest_stamp = stamps.first().cloned().ok_opt("No stamp exists")?;
+    debug!(LOGGER, "Oldest stamp in RSI: {}", oldest_stamp.timestamp);
+
+    // Load prices/orderbooks of all markets within RSI timespan, then sort them by timestamp
+    let mut price_group = schema::price::table
+        .filter(schema::price::stamp_id.ge(oldest_stamp.stamp_id))
+        .load::<Price>(conn)?
+        .apply(|prices| group_by(prices, |p| p.market_id))
+        .also(|group| {
+            group
+                .values_mut()
+                .for_each(|g| g.sort_by_key(|p| p.stamp_id))
+        });
+    let mut orderbook_group = schema::orderbook::table
+        .filter(schema::orderbook::stamp_id.ge(oldest_stamp.stamp_id))
+        .load::<Orderbook>(conn)?
+        .apply(|orderbooks| group_by(orderbooks, |o| o.market_id))
+        .also(|group| {
+            group
+                .values_mut()
+                .for_each(|g| g.sort_by_key(|p| p.stamp_id))
+        });
+
+    // Speculator for each market
     let speculators = target_markets
         .into_iter()
-        .filter_map(|(base, quote, market)| {
-            let market_id = market.market_id;
-            let price_stamps = match schema::price::table
-                .inner_join(
-                    schema::stamp::table.on(schema::price::stamp_id.eq(schema::stamp::stamp_id)),
-                )
-                .filter(schema::price::market_id.eq(market_id))
-                .filter(schema::stamp::timestamp.ge(rsi_oldest_stamp))
-                .load::<(Price, Stamp)>(conn)
-            {
-                Ok(price_stamps) => Some(price_stamps),
-                Err(e) => {
-                    warn!(LOGGER, "Can't fetch prices for market {}: {}", market_id, e);
-                    None
-                }
-            }?;
-            debug!(LOGGER, "Use {} price-stamp pairs", price_stamps.len());
+        .map(|(base, quote, market)| {
+            // Get price/orderbook of speculator's market
+            let prices = price_group
+                .remove(&market.market_id)
+                .unwrap_or(vec![])
+                .into_iter()
+                .map(|p| (p.stamp_id, p))
+                .collect::<HashMap<_, _>>();
+            let orderbooks = orderbook_group.remove(&market.market_id).unwrap_or(vec![]);
+            debug!(
+                LOGGER,
+                "Market {}-{}: price count:{},orderbook count:{}",
+                base.symbol,
+                quote.symbol,
+                prices.len(),
+                orderbooks.len()
+            );
+
+            let mut orderbook_collections = group_by(orderbooks, |o| o.stamp_id);
 
             let mut speculator = MultipleRsiSpeculator::new(
                 market,
@@ -144,26 +191,26 @@ fn construct_speculators(
                 spend_buy_ratio,
                 spend_sell_ratio,
             );
-            for (price, stamp) in price_stamps.into_iter() {
-                let orderbooks = schema::orderbook::table
-                    .filter(schema::orderbook::stamp_id.eq(stamp.stamp_id))
-                    .filter(schema::orderbook::market_id.eq(market_id))
-                    .load(conn)
+
+            // Push market-state sequence
+            for stamp in stamps.iter().cloned() {
+                let price = prices.get(&stamp.stamp_id);
+                let orderbooks = orderbook_collections
+                    .remove(&stamp.stamp_id)
                     .unwrap_or(vec![]);
-                let myorders = schema::myorder::table
-                    .filter(schema::myorder::market_id.eq(market_id))
-                    .filter(schema::myorder::modified_stamp_id.eq(stamp.stamp_id))
-                    .load(conn)
-                    .unwrap_or(vec![]);
-                let market_state = MarketState {
-                    stamp,
-                    price,
-                    orderbooks,
-                    myorders,
-                };
-                speculator.update_market_state(market_state);
+                let myorders = vec![]; // Omit myorder because it is unnecessary yet
+                if let Some(price) = price.cloned() {
+                    let market_state = MarketState {
+                        stamp,
+                        price,
+                        orderbooks,
+                        myorders,
+                    };
+                    speculator.update_market_state(market_state);
+                }
             }
-            Some((base, quote, speculator))
+
+            (base, quote, speculator)
         })
         .collect();
 
