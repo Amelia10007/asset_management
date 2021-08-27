@@ -156,6 +156,11 @@ impl Speculator for MultipleRsiSpeculator {
         // Deny other market's data
         assert!(self.is_valid_market_state(&new_market_state));
 
+        // Deny older timestamp data
+        if let Some(last_state) = self.market_states.last() {
+            assert!(new_market_state.stamp.timestamp > last_state.stamp.timestamp);
+        }
+
         let timestamp = new_market_state.stamp.timestamp;
         let new_price = new_market_state.price.amount as f64;
 
