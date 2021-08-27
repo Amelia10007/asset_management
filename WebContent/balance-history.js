@@ -38,8 +38,9 @@ const renderBalances = (json) => {
 
         for (key2 in balances) {
             const balance = balances[key2];
-            const available = balance['available'] * balance['rate'];
-            const pending = balance['pending'] * balance['rate'];
+            const rate = balance['rate'];
+            const available = balance['available'] * rate;
+            const pending = balance['pending'] * rate;
             const totalBalance = available + pending;
 
             if (totalBalance > 0) {
