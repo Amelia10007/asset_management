@@ -67,7 +67,7 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
                 .zip(balance_history)
                 .map(|((stamp, exchange_rate), balances)| {
                     let balances = balances.unwrap_or(vec![]);
-                    let fiats = match exchange_rate {
+                    let rates = match exchange_rate {
                         Ok(exchange_rate) => balances
                             .iter()
                             .map(|b| {
@@ -76,7 +76,7 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
                             .collect_vec(),
                         Err(_) => vec![None; balances.len()],
                     };
-                    (stamp, balances, fiats)
+                    (stamp, balances, rates)
                 })
                 .collect::<Vec<_>>()
         }
@@ -85,8 +85,8 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
             .zip(balance_history)
             .map(|(stamp, balances)| {
                 let balances = balances.unwrap_or(vec![]);
-                let fiats = vec![None; balances.len()];
-                (stamp, balances, fiats)
+                let rates = vec![None; balances.len()];
+                (stamp, balances, rates)
             })
             .collect(),
     };
@@ -94,19 +94,19 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
     let mut json = JsonValue::new_object();
     json["success"] = true.into();
     let mut history_array = JsonValue::new_array();
-    for (stamp, balances, fiats) in history {
+    for (stamp, balances, rates) in history {
         let mut history = JsonValue::new_object();
         history["stamp"] = stamp.timestamp.format("%Y-%m-%dT%H:%M").to_string().into();
         let mut currencies = JsonValue::new_array();
-        for (balance, fiat) in balances.into_iter().zip_eq(fiats) {
+        for (balance, rate) in balances.into_iter().zip_eq(rates) {
             if let Some(currency) = currency_collection.by_id(balance.currency_id) {
                 let mut currency_json = JsonValue::new_object();
                 currency_json["name"] = currency.name.as_str().into();
                 currency_json["symbol"] = currency.symbol.as_str().into();
                 currency_json["available"] = balance.available.into();
                 currency_json["pending"] = balance.pending.into();
-                if let Some(fiat) = fiat {
-                    currency_json["fiat"] = fiat.into();
+                if let Some(rate) = rate {
+                    currency_json["rate"] = rate.into();
                 }
                 currencies.push(currency_json).ok();
             }

@@ -31,7 +31,7 @@ const renderBalances = (json) => {
 
     for (key in currentBalances['currencies']) {
         const balance = currentBalances['currencies'][key];
-        const rate = balance['fiat']
+        const rate = balance['rate']
         const available = balance['available'] * rate;
         const pending = balance['pending'] * rate;
         const totalBalance = available + pending;
