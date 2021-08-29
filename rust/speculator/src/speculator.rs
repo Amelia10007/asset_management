@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 
+use crate::chart::PriceStamp;
 use crate::rsi::{Duration, RsiHistory};
 use apply::Apply;
+pub use chrono::{DateTime, Utc};
 use database::model::*;
 use itertools::Itertools;
 
@@ -120,7 +122,7 @@ pub struct MultipleRsiSpeculator {
     market: Market,
     market_states: Vec<MarketState>,
     // RSI ordered by timespan descending
-    rsi_histories: Vec<RsiHistory>,
+    rsi_histories: Vec<RsiHistory<DateTime<Utc>>>,
     spend_buy_ratio: Amount,
     spend_sell_ratio: Amount,
 }
@@ -129,12 +131,13 @@ impl MultipleRsiSpeculator {
     pub fn new(
         market: Market,
         rsi_timespans: Vec<Duration>,
+        rsi_candlestick_count: usize,
         spend_buy_ratio: Amount,
         spend_sell_ratio: Amount,
     ) -> Self {
         let rsi_histories = rsi_timespans
             .into_iter()
-            .map(|span| RsiHistory::new(span))
+            .map(|span| RsiHistory::new(span, rsi_candlestick_count))
             .collect();
 
         Self {
@@ -161,11 +164,13 @@ impl Speculator for MultipleRsiSpeculator {
             assert!(new_market_state.stamp.timestamp > last_state.stamp.timestamp);
         }
 
-        let timestamp = new_market_state.stamp.timestamp;
-        let new_price = new_market_state.price.amount as f64;
+        let price_stamp = PriceStamp::new(
+            DateTime::from_utc(new_market_state.stamp.timestamp, Utc),
+            new_market_state.price.amount as f64,
+        );
 
         for rsi_history in self.rsi_histories.iter_mut() {
-            rsi_history.update_price(timestamp, new_price);
+            rsi_history.update(price_stamp).ok();
         }
 
         // Drop needless myorder data for RSI-based speculation
@@ -232,7 +237,7 @@ impl Speculator for MultipleRsiSpeculator {
 }
 
 fn recommend_side_by_rsis<'a>(
-    rsi_histories: impl IntoIterator<Item = &'a RsiHistory>,
+    rsi_histories: impl IntoIterator<Item = &'a RsiHistory<DateTime<Utc>>>,
 ) -> Option<(OrderSide, RecommendationDescription)> {
     for rsi_history in rsi_histories.into_iter() {
         match recommend_side_by_rsi(rsi_history) {
@@ -246,36 +251,37 @@ fn recommend_side_by_rsis<'a>(
     None
 }
 
-fn recommend_side_by_rsi(rsi_history: &RsiHistory) -> SideRecommendation {
+fn recommend_side_by_rsi(rsi_history: &RsiHistory<DateTime<Utc>>) -> SideRecommendation {
     let buy_th = 30.0;
     let sell_th = 70.0;
 
-    let mut rsis = rsi_history.rsis();
-    let last = rsis.next_back().copied().flatten().map(|rsi| rsi.percent());
-    let last2 = rsis.next_back().copied().flatten().map(|rsi| rsi.percent());
+    let (last2, last) = match rsi_history.rsis().tuple_windows().last() {
+        Some((Some(last2), Some(last))) => (last2.rsi(), last.rsi()),
+        _ => return SideRecommendation::Undetermined,
+    };
 
-    match (last2, last) {
-        (Some(last2), Some(last)) if last2 < buy_th && last >= buy_th => {
-            let reason = format!(
-                "RSI: {}, Timespan: {}m",
-                last,
-                rsi_history.timespan().num_minutes()
-            );
-            let description = RecommendationDescription { reason };
-            SideRecommendation::Buy(description)
-        }
-        (Some(last2), Some(last)) if last2 > sell_th && last <= sell_th => {
-            let reason = format!(
-                "RSI: {}, Timespan: {}m",
-                last,
-                rsi_history.timespan().num_minutes()
-            );
-            let description = RecommendationDescription { reason };
-            SideRecommendation::Sell(description)
-        }
-        (_, Some(last)) if last < buy_th => SideRecommendation::Pending,
-        (_, Some(last)) if last > sell_th => SideRecommendation::Pending,
-        _ => SideRecommendation::Undetermined,
+    if last2.percent() < buy_th && last.percent() >= buy_th {
+        let reason = format!(
+            "RSI: {}, Timespan: {}m",
+            last.percent(),
+            rsi_history.candlestick_span().num_minutes()
+        );
+        let description = RecommendationDescription { reason };
+        SideRecommendation::Buy(description)
+    } else if last2.percent() > sell_th && last.percent() <= sell_th {
+        let reason = format!(
+            "RSI: {}, Timespan: {}m",
+            last.percent(),
+            rsi_history.candlestick_span().num_minutes()
+        );
+        let description = RecommendationDescription { reason };
+        SideRecommendation::Sell(description)
+    } else if last.percent() < buy_th {
+        SideRecommendation::Pending
+    } else if last.percent() > sell_th {
+        SideRecommendation::Pending
+    } else {
+        SideRecommendation::Undetermined
     }
 }
 

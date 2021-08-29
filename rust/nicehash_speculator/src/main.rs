@@ -118,6 +118,8 @@ fn construct_speculators(
 ) -> Result<Vec<(Currency, Currency, MultipleRsiSpeculator)>> {
     let rsi_timespans = env::var("RSI_TIMESPAN_MINUTES")?
         .apply_ref(|minutes_str| parse_rsi_timespans(minutes_str))?;
+    let rsi_candlestick_count =
+        env::var("RSI_CANDLESTICK_COUNT")?.apply(|s| usize::from_str(&s))?;
     let spend_buy_ratio = env::var("SIM_SPEND_BUY_RATIO")?.apply(|s| Amount::from_str(&s))?;
     let spend_sell_ratio = env::var("SIM_SPEND_SELL_RATIO")?.apply(|s| Amount::from_str(&s))?;
 
@@ -133,7 +135,8 @@ fn construct_speculators(
             .copied()
             .ok_opt("At least one rsi-timespan is required")?;
         // Twice timespan is required to obtain RSIs in the specified timespan
-        let rsi_oldest_timestamp = latest_main_stamp.timestamp - longest_timespan * 2;
+        let rsi_oldest_timestamp =
+            latest_main_stamp.timestamp - longest_timespan * rsi_candlestick_count as i32 * 2;
         schema::stamp::table
             .filter(schema::stamp::timestamp.ge(rsi_oldest_timestamp))
             .order_by(schema::stamp::timestamp.asc())
@@ -188,6 +191,7 @@ fn construct_speculators(
             let mut speculator = MultipleRsiSpeculator::new(
                 market,
                 rsi_timespans.clone(),
+                rsi_candlestick_count,
                 spend_buy_ratio,
                 spend_sell_ratio,
             );
