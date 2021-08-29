@@ -16,13 +16,11 @@ use itertools::Itertools;
 use json::JsonValue;
 use rayon::prelude::*;
 use std::env;
-use std::ops::Deref;
-use std::rc::Rc;
 
 type Duration = <NaiveDateTime as Sub>::Output;
 
 pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
-    let (price_conn, balance_conn, _) = connect_db(&query)?;
+    let (conn, _) = connect_db(&query)?;
 
     let timestamps = {
         let since = query
@@ -36,10 +34,10 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
             .and_then(|s| parse_query_step(s))
             .unwrap_or(Duration::days(1));
 
-        get_target_timestamps(&price_conn, since, until, step)
+        get_target_timestamps(&conn, since, until, step)
     }?;
 
-    let currency_collection = list_currencies(&price_conn)?;
+    let currency_collection = list_currencies(&conn)?;
 
     let fiat_symbol = query.get(&"fiat");
     let fiat_currency = fiat_symbol
@@ -51,7 +49,7 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
         .map(|stamp| {
             schema::balance::table
                 .filter(schema::balance::stamp_id.eq(stamp.stamp_id))
-                .load::<Balance>(&*balance_conn)
+                .load::<Balance>(&conn)
         })
         .collect::<Vec<_>>();
 
@@ -59,7 +57,7 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
         Some(fiat_currency) => {
             let exchange_rate_history = timestamps
                 .iter()
-                .map(|stamp| construct_exchange_graph(&price_conn, stamp.stamp_id))
+                .map(|stamp| construct_exchange_graph(&conn, stamp.stamp_id))
                 .collect::<Vec<_>>();
             timestamps
                 .into_par_iter()
@@ -119,27 +117,17 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
     Ok(json)
 }
 
-/// # Returns
-/// `Ok(db_conn, balance_conn)` if successfully connected.
-///
-/// NOTE: If query specifies using simulation, `balance_conn` refers simulation DB.
-fn connect_db(query: &HttpQuery<'_>) -> Result<(Rc<Conn>, Rc<Conn>, bool)> {
+fn connect_db(query: &HttpQuery<'_>) -> Result<(Conn, bool)> {
     let use_simulation_balance = matches!(query.get(&"sim"), Some(&"1"));
 
-    let price_conn = env::var("DATABASE_URL")?
-        .deref()
-        .apply(Conn::establish)?
-        .apply(Rc::new);
-    let balance_conn = if use_simulation_balance {
+    let url = if use_simulation_balance {
         env::var("SIM_DATABASE_URL")?
-            .deref()
-            .apply(Conn::establish)?
-            .apply(Rc::new)
     } else {
-        price_conn.clone()
+        env::var("DATABASE_URL")?
     };
+    let conn = Conn::establish(&url)?;
 
-    Ok((price_conn, balance_conn, use_simulation_balance))
+    Ok((conn, use_simulation_balance))
 }
 
 fn parse_query_step(step_str: &str) -> Option<Duration> {
