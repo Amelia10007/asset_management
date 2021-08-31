@@ -9,7 +9,7 @@ use itertools::Itertools;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IncompleteMyorder {
-    pub market_id: IdType,
+    pub market_id: MarketId,
     pub price: Amount,
     pub base_quantity: Amount,
     pub quote_quantity: Amount,

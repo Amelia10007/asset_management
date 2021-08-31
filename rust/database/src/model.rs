@@ -2,19 +2,18 @@ pub use crate::custom_sql_type::*;
 use crate::schema::*;
 pub use chrono::NaiveDateTime;
 
-pub type IdType = i32;
 pub type Amount = f32;
 
 #[derive(Debug, Clone, PartialEq, Queryable, Insertable)]
 #[table_name = "currency"]
 pub struct Currency {
-    pub currency_id: IdType,
+    pub currency_id: CurrencyId,
     pub symbol: String,
     pub name: String,
 }
 
 impl Currency {
-    pub fn new(currency_id: IdType, symbol: String, name: String) -> Self {
+    pub fn new(currency_id: CurrencyId, symbol: String, name: String) -> Self {
         Self {
             currency_id,
             symbol,
@@ -26,12 +25,12 @@ impl Currency {
 #[derive(Debug, Clone, PartialEq, Queryable, Insertable)]
 #[table_name = "stamp"]
 pub struct Stamp {
-    pub stamp_id: IdType,
+    pub stamp_id: StampId,
     pub timestamp: NaiveDateTime,
 }
 
 impl Stamp {
-    pub fn new(stamp_id: IdType, timestamp: NaiveDateTime) -> Self {
+    pub fn new(stamp_id: StampId, timestamp: NaiveDateTime) -> Self {
         Self {
             stamp_id,
             timestamp,
@@ -42,18 +41,18 @@ impl Stamp {
 #[derive(Debug, Clone, PartialEq, Queryable, Insertable)]
 #[table_name = "balance"]
 pub struct Balance {
-    pub balance_id: IdType,
-    pub currency_id: IdType,
-    pub stamp_id: IdType,
+    pub balance_id: BalanceId,
+    pub currency_id: CurrencyId,
+    pub stamp_id: StampId,
     pub available: Amount,
     pub pending: Amount,
 }
 
 impl Balance {
     pub fn new(
-        balance_id: IdType,
-        currency_id: IdType,
-        stamp_id: IdType,
+        balance_id: BalanceId,
+        currency_id: CurrencyId,
+        stamp_id: StampId,
         available: Amount,
         pending: Amount,
     ) -> Self {
@@ -70,13 +69,13 @@ impl Balance {
 #[derive(Debug, Clone, PartialEq, Queryable, Insertable)]
 #[table_name = "market"]
 pub struct Market {
-    pub market_id: IdType,
-    pub base_id: IdType,
-    pub quote_id: IdType,
+    pub market_id: MarketId,
+    pub base_id: CurrencyId,
+    pub quote_id: CurrencyId,
 }
 
 impl Market {
-    pub fn new(market_id: IdType, base_id: IdType, quote_id: IdType) -> Self {
+    pub fn new(market_id: MarketId, base_id: CurrencyId, quote_id: CurrencyId) -> Self {
         Self {
             market_id,
             base_id,
@@ -88,14 +87,14 @@ impl Market {
 #[derive(Debug, Clone, PartialEq, Queryable, Insertable)]
 #[table_name = "price"]
 pub struct Price {
-    pub price_id: IdType,
-    pub market_id: IdType,
-    pub stamp_id: IdType,
+    pub price_id: PriceId,
+    pub market_id: MarketId,
+    pub stamp_id: StampId,
     pub amount: Amount,
 }
 
 impl Price {
-    pub fn new(price_id: IdType, market_id: IdType, stamp_id: IdType, amount: Amount) -> Self {
+    pub fn new(price_id: PriceId, market_id: MarketId, stamp_id: StampId, amount: Amount) -> Self {
         Self {
             price_id,
             market_id,
@@ -108,9 +107,9 @@ impl Price {
 #[derive(Debug, Clone, PartialEq, Queryable, Insertable)]
 #[table_name = "orderbook"]
 pub struct Orderbook {
-    pub orderbook_id: IdType,
-    pub market_id: IdType,
-    pub stamp_id: IdType,
+    pub orderbook_id: OrderbookId,
+    pub market_id: MarketId,
+    pub stamp_id: StampId,
     pub side: OrderSide,
     pub price: Amount,
     pub volume: Amount,
@@ -119,11 +118,11 @@ pub struct Orderbook {
 #[derive(Debug, Clone, PartialEq, Queryable, Insertable)]
 #[table_name = "myorder"]
 pub struct MyOrder {
-    pub myorder_id: IdType,
+    pub myorder_id: MyorderId,
     pub transaction_id: String,
-    pub market_id: IdType,
-    pub created_stamp_id: IdType,
-    pub modified_stamp_id: IdType,
+    pub market_id: MarketId,
+    pub created_stamp_id: StampId,
+    pub modified_stamp_id: StampId,
     pub price: Amount,
     pub base_quantity: Amount,
     pub quote_quantity: Amount,

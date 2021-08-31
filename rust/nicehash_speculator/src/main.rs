@@ -224,10 +224,10 @@ fn construct_speculators(
 fn load_latest_sim_balances(
     balance_sim_conn: &Conn,
     currency_collection: &CurrencyCollection,
-) -> Result<HashMap<IdType, Balance>> {
+) -> Result<HashMap<CurrencyId, Balance>> {
     let latest_balance_stamp_id = schema::balance::table
         .select(max(schema::balance::stamp_id))
-        .first::<Option<IdType>>(balance_sim_conn)?
+        .first::<Option<StampId>>(balance_sim_conn)?
         .ok_opt("No balance exists in simulation DB")?;
     currency_collection
         .currencies()
@@ -262,13 +262,14 @@ fn load_latest_sim_balances(
         .apply(Ok)
 }
 
-fn get_sim_next_balance_id(balance_sim_conn: &Conn) -> IdType {
-    schema::balance::table
+fn get_sim_next_balance_id(balance_sim_conn: &Conn) -> BalanceId {
+    let id = schema::balance::table
         .select(max(schema::balance::balance_id))
-        .first::<Option<i32>>(balance_sim_conn)
+        .first::<Option<BalanceId>>(balance_sim_conn)
         .unwrap_or(None)
-        .unwrap_or(0)
-        + 1
+        .unwrap_or(BalanceId::new(0));
+    let next_id = (id.inner() + 1).apply(BalanceId::new);
+    next_id
 }
 
 fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp) -> Result<()> {
@@ -380,7 +381,7 @@ fn batch() -> Result<()> {
 
     let last_sim_stamp_id = schema::balance::table
         .select(max(schema::balance::stamp_id))
-        .first::<Option<IdType>>(&balance_sim_conn)?;
+        .first::<Option<StampId>>(&balance_sim_conn)?;
     let latest_main_stamp = get_latest_stamp(&conn)?;
 
     match last_sim_stamp_id {

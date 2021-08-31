@@ -18,7 +18,7 @@ impl CurrencyCollection {
         self.currencies.as_slice()
     }
 
-    pub fn by_id(&self, currency_id: IdType) -> Option<&Currency> {
+    pub fn by_id(&self, currency_id: CurrencyId) -> Option<&Currency> {
         self.currencies
             .iter()
             .find(|c| c.currency_id == currency_id)
@@ -39,14 +39,14 @@ impl MarketCollection {
         self.markets.as_slice()
     }
 
-    pub fn by_id(&self, market_id: IdType) -> Option<&Market> {
+    pub fn by_id(&self, market_id: MarketId) -> Option<&Market> {
         self.markets.iter().find(|m| m.market_id == market_id)
     }
 
     pub fn by_base_quote_id(
         &self,
-        base_currency_id: IdType,
-        quote_currency_id: IdType,
+        base_currency_id: CurrencyId,
+        quote_currency_id: CurrencyId,
     ) -> Option<&Market> {
         self.markets()
             .iter()
@@ -74,7 +74,7 @@ pub fn add_currency(conn: &Conn, symbol: String, name: String) -> Result<Currenc
         return Err(LogicError::DuplicatedCurrency.into());
     }
 
-    let currency_id: IdType = next_id::table.select(next_id::currency).first(conn)?;
+    let currency_id: CurrencyId = next_id::table.select(next_id::currency).first(conn)?;
 
     let currency = Currency::new(currency_id, symbol, name);
     conn.transaction::<(), Error, _>(|| {
@@ -119,8 +119,8 @@ pub fn add_stamp(conn: &Conn, timestamp: NaiveDateTime) -> Result<Stamp> {
 
 pub fn add_balance(
     conn: &Conn,
-    currency_id: IdType,
-    stamp_id: IdType,
+    currency_id: CurrencyId,
+    stamp_id: StampId,
     available: Amount,
     pending: Amount,
 ) -> Result<Balance> {
@@ -156,8 +156,8 @@ pub fn list_markets(conn: &Conn) -> Result<MarketCollection> {
 
 pub fn add_market(
     conn: &Conn,
-    base_currency_id: IdType,
-    quote_currency_id: IdType,
+    base_currency_id: CurrencyId,
+    quote_currency_id: CurrencyId,
 ) -> Result<Market> {
     if market::table
         .filter(market::base_id.eq(base_currency_id))
@@ -194,8 +194,8 @@ pub fn add_market(
 
 pub fn add_price(
     conn: &Conn,
-    market_id: IdType,
-    stamp_id: IdType,
+    market_id: MarketId,
+    stamp_id: StampId,
     amount: Amount,
 ) -> Result<Price> {
     let price_id = next_id::table.select(next_id::price).first(conn)?;
@@ -223,8 +223,8 @@ pub fn add_price(
 
 pub fn add_orderbook(
     conn: &Conn,
-    market_id: IdType,
-    stamp_id: IdType,
+    market_id: MarketId,
+    stamp_id: StampId,
     side: OrderSide,
     price: Amount,
     volume: Amount,
@@ -262,8 +262,8 @@ pub fn add_orderbook(
 pub fn add_or_update_myorder(
     conn: &Conn,
     transaction_id: String,
-    market_id: IdType,
-    now_stamp_id: IdType,
+    market_id: MarketId,
+    now_stamp_id: StampId,
     price: Amount,
     base_quantity: Amount,
     quote_quantity: Amount,

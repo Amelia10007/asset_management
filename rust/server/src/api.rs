@@ -208,7 +208,7 @@ fn get_target_timestamps(
     Ok(filtered_timestamps)
 }
 
-fn construct_exchange_graph(conn: &Conn, timestamp_id: IdType) -> Result<ExchangeGraph<IdType>> {
+fn construct_exchange_graph(conn: &Conn, timestamp_id: StampId) -> Result<ExchangeGraph<CurrencyId>> {
     use schema::*;
 
     let prices = price::table
