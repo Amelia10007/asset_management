@@ -12,3 +12,4 @@ database = { path = "../database" }
 apply = "*"
 chrono = "*"
 itertools = "*"
+tuple-map = "*"

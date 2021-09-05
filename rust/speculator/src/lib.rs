@@ -1,4 +1,3 @@
-pub mod bollinger;
-pub mod chart;
-pub mod rsi;
-pub mod speculator;
+pub mod indicator;
+pub mod rule;
+pub mod trade;

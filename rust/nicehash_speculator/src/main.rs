@@ -1,4 +1,7 @@
-use apply::Also;
+mod market_parse;
+mod rule_parse;
+mod trade_parse;
+
 use apply::Apply;
 use common::alias::BoxErr;
 use common::alias::Result;
@@ -11,16 +14,15 @@ use diesel::dsl::max;
 use diesel::insert_into;
 use diesel::prelude::*;
 use once_cell::sync::Lazy;
-use speculator::rsi::Duration;
-use speculator::speculator::{MarketState, MultipleRsiSpeculator, Speculator};
+use speculator::rule::MarketState;
+use speculator::rule::RecommendationType;
+use speculator::trade::TradeAggregation;
 use std::collections::HashMap;
 use std::env;
 use std::hash::Hash;
 use std::io::{stdout, Stdout};
-use std::ops::Deref;
-use std::str::FromStr;
 
-static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
+pub static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
     let level = match env::var("SPECULATOR_LOGGER_LEVEL")
         .map(|s| s.to_lowercase())
         .as_deref()
@@ -77,148 +79,91 @@ fn get_latest_stamp(conn: &Conn) -> Result<Stamp> {
         .map_err(Into::into)
 }
 
-fn parse_rsi_timespans(minutes_str: &str) -> Result<Vec<Duration>> {
-    minutes_str
-        .split(':')
-        .map(|minutes_str| {
-            i64::from_str(minutes_str)
-                .map(Duration::minutes)
-                .map_err(Into::into)
-        })
-        .collect()
-}
-
-fn parse_market_symbols(
-    s: &str,
+pub fn construct_speculators(
     currency_collection: &CurrencyCollection,
     market_collection: &MarketCollection,
-) -> Vec<(Currency, Currency, Market)> {
-    s.split(':')
-        .map(|symbol_pair| symbol_pair.split('-'))
-        .filter_map(|mut iter| match (iter.next(), iter.next()) {
-            (Some(base), Some(quote)) => Some((base, quote)),
-            _ => None,
+) -> Result<HashMap<MarketId, TradeAggregation>> {
+    let rule_setting = env::var("RULE_JSON")?.apply(|path| {
+        rule_parse::RuleSetting::from_json(path, currency_collection, market_collection)
+    })?;
+    let trade_setting = env::var("TRADE_JSON")?.apply(trade_parse::TradeSetting::from_json)?;
+
+    rule_setting
+        .into_rules_per_market()
+        .map(|(market, weighted_rules)| {
+            TradeAggregation::new(market, trade_setting.trade_parameter, weighted_rules)
         })
-        .filter_map(|(base_symbol, quote_symbol)| {
-            let base = currency_collection.by_symbol(base_symbol)?;
-            let quote = currency_collection.by_symbol(quote_symbol)?;
-            let market = market_collection.by_base_quote_id(base.currency_id, quote.currency_id)?;
-            Some((base.clone(), quote.clone(), market.clone()))
-        })
-        .collect()
+        .map(|aggregation| (aggregation.market().market_id, aggregation))
+        .collect::<HashMap<_, _>>()
+        .apply(Ok)
 }
 
-/// # Returns
-/// Vec of `(base currency, quote currency, rsi)` if succeeds
-fn construct_speculators(
+pub fn load_market_states(
     conn: &Conn,
-    currency_collection: &CurrencyCollection,
-    market_collection: &MarketCollection,
     latest_main_stamp: Stamp,
-) -> Result<Vec<(Currency, Currency, MultipleRsiSpeculator)>> {
-    let rsi_timespans = env::var("RSI_TIMESPAN_MINUTES")?
-        .apply_ref(|minutes_str| parse_rsi_timespans(minutes_str))?;
-    let rsi_candlestick_count =
-        env::var("RSI_CANDLESTICK_COUNT")?.apply(|s| usize::from_str(&s))?;
-    let spend_buy_ratio = env::var("SIM_SPEND_BUY_RATIO")?.apply(|s| Amount::from_str(&s))?;
-    let spend_sell_ratio = env::var("SIM_SPEND_SELL_RATIO")?.apply(|s| Amount::from_str(&s))?;
+    aggregations: &mut HashMap<MarketId, TradeAggregation>,
+) -> Result<()> {
+    let required_duration = match aggregations
+        .values()
+        .flat_map(|a| a.weighted_rules())
+        .flat_map(|weighted_rule| weighted_rule.rule().duration_requirement())
+        .max()
+    {
+        Some(d) => d,
+        None => return Ok(()),
+    };
 
-    let market_symbols = env::var("SPECULATOR_TARGET_MARKETS")?;
-    let target_markets =
-        parse_market_symbols(&market_symbols, currency_collection, market_collection);
-
-    // Load RSI-target timestamps
+    // Load necessary timestamps
     let stamps = {
-        let longest_timespan = rsi_timespans
-            .iter()
-            .max()
-            .copied()
-            .ok_opt("At least one rsi-timespan is required")?;
-        // Twice timespan is required to obtain RSIs in the specified timespan
-        let rsi_oldest_timestamp =
-            latest_main_stamp.timestamp - longest_timespan * rsi_candlestick_count as i32 * 2;
+        let rsi_oldest_timestamp = latest_main_stamp.timestamp - required_duration;
         schema::stamp::table
             .filter(schema::stamp::timestamp.ge(rsi_oldest_timestamp))
             .order_by(schema::stamp::timestamp.asc())
             .load::<Stamp>(conn)?
     };
-    let oldest_stamp = stamps.first().cloned().ok_opt("No stamp exists")?;
-    debug!(LOGGER, "Oldest stamp in RSI: {}", oldest_stamp.timestamp);
+    let oldest_stamp = match stamps.first().cloned() {
+        Some(stamp) => stamp,
+        None => return Ok(()),
+    };
 
-    // Load prices/orderbooks of all markets within RSI timespan, then sort them by timestamp
-    let mut price_group = schema::price::table
+    // Load prices/orderbooks of all markets within timespan
+    let price_group = schema::price::table
         .filter(schema::price::stamp_id.ge(oldest_stamp.stamp_id))
         .load::<Price>(conn)?
-        .apply(|prices| group_by(prices, |p| p.market_id))
-        .also(|group| {
-            group
-                .values_mut()
-                .for_each(|g| g.sort_by_key(|p| p.stamp_id))
-        });
-    let mut orderbook_group = schema::orderbook::table
+        .into_iter()
+        .map(|p| ((p.market_id, p.stamp_id), p))
+        .collect::<HashMap<_, _>>();
+    let orderbook_group = schema::orderbook::table
         .filter(schema::orderbook::stamp_id.ge(oldest_stamp.stamp_id))
         .load::<Orderbook>(conn)?
-        .apply(|orderbooks| group_by(orderbooks, |o| o.market_id))
-        .also(|group| {
-            group
-                .values_mut()
-                .for_each(|g| g.sort_by_key(|p| p.stamp_id))
-        });
+        .apply(|orderbooks| group_by(orderbooks, |o| (o.market_id, o.stamp_id)));
 
-    // Speculator for each market
-    let speculators = target_markets
-        .into_iter()
-        .map(|(base, quote, market)| {
-            // Get price/orderbook of speculator's market
-            let prices = price_group
-                .remove(&market.market_id)
-                .unwrap_or(vec![])
-                .into_iter()
-                .map(|p| (p.stamp_id, p))
-                .collect::<HashMap<_, _>>();
-            let orderbooks = orderbook_group.remove(&market.market_id).unwrap_or(vec![]);
-            debug!(
-                LOGGER,
-                "Market {}-{}: price count:{},orderbook count:{}",
-                base.symbol,
-                quote.symbol,
-                prices.len(),
-                orderbooks.len()
-            );
+    // Push market states
+    for (&market_id, aggregation) in aggregations.iter_mut() {
+        for stamp in stamps.iter().cloned() {
+            let price = price_group.get(&(market_id, stamp.stamp_id));
+            let orderbooks = orderbook_group
+                .get(&(market_id, stamp.stamp_id))
+                .cloned()
+                .unwrap_or_default();
 
-            let mut orderbook_collections = group_by(orderbooks, |o| o.stamp_id);
-
-            let mut speculator = MultipleRsiSpeculator::new(
-                market,
-                rsi_timespans.clone(),
-                rsi_candlestick_count,
-                spend_buy_ratio,
-                spend_sell_ratio,
-            );
-
-            // Push market-state sequence
-            for stamp in stamps.iter().cloned() {
-                let price = prices.get(&stamp.stamp_id);
-                let orderbooks = orderbook_collections
-                    .remove(&stamp.stamp_id)
-                    .unwrap_or(vec![]);
-                let myorders = vec![]; // Omit myorder because it is unnecessary yet
-                if let Some(price) = price.cloned() {
-                    let market_state = MarketState {
-                        stamp,
-                        price,
-                        orderbooks,
-                        myorders,
-                    };
-                    speculator.update_market_state(market_state);
+            if let Some(price) = price.cloned() {
+                let market_state = MarketState {
+                    stamp,
+                    price,
+                    orderbooks,
+                    myorders: vec![], // Omit myorder because it is unnecessary yet
+                };
+                if let Err(errors) = aggregation.update_market_state(market_state) {
+                    for e in errors.into_iter() {
+                        warn!(LOGGER, "{}", e);
+                    }
                 }
             }
+        }
+    }
 
-            (base, quote, speculator)
-        })
-        .collect();
-
-    Ok(speculators)
+    Ok(())
 }
 
 fn load_latest_sim_balances(
@@ -241,7 +186,7 @@ fn load_latest_sim_balances(
             match latest_balance {
                 Ok(Some(balance)) => Some(balance),
                 Ok(None) => {
-                    info!(
+                    debug!(
                         LOGGER,
                         "Currency {} is not found in simulation balances. Its balance is assumed 0",
                         c.name
@@ -276,26 +221,38 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
     let currency_collection = list_currencies(&conn)?;
     let market_collection = list_markets(&conn)?;
 
-    let speculators = construct_speculators(
-        conn,
-        &currency_collection,
-        &market_collection,
-        latest_main_stamp.clone(),
-    )?;
+    let mut speculators = construct_speculators(&currency_collection, &market_collection)?;
+    load_market_states(conn, latest_main_stamp.clone(), &mut speculators)?;
+
+    let market_setting = env::var("MARKET_JSON")?.apply(market_parse::MarketSetting::from_json)?;
+    let fee_ratio = market_setting.fee_ratio;
 
     let mut current_balances = load_latest_sim_balances(&balance_sim_conn, &currency_collection)?;
 
-    let fee_ratio = env::var("SIM_FEE_RATIO")?.deref().apply(Amount::from_str)?;
-
-    for (base, quote, speculator) in speculators.into_iter() {
-        let base_balance = match current_balances.get(&base.currency_id) {
+    for (_, speculator) in speculators.into_iter() {
+        let market = speculator.market();
+        let base = match currency_collection.by_id(market.base_id) {
+            Some(base) => base,
+            None => {
+                warn!(LOGGER, "Unknown base id");
+                continue;
+            }
+        };
+        let quote = match currency_collection.by_id(market.quote_id) {
+            Some(quote) => quote,
+            None => {
+                warn!(LOGGER, "Unknown quote id");
+                continue;
+            }
+        };
+        let base_balance = match current_balances.get(&market.base_id).cloned() {
             Some(b) => b,
             None => {
                 warn!(LOGGER, "Currency {} is not found in balances", base.name);
                 continue;
             }
         };
-        let quote_balance = match current_balances.get(&quote.currency_id) {
+        let quote_balance = match current_balances.get(&market.quote_id).cloned() {
             Some(b) => b,
             None => {
                 warn!(LOGGER, "Currency {} is not found in balances", quote.name);
@@ -303,26 +260,40 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
             }
         };
 
-        let recommendations = speculator.recommend(&base_balance, &quote_balance);
-        debug!(
-            LOGGER,
-            "Speculator recommendation: {}, Market: {:?}",
-            recommendations.len(),
-            speculator.market()
-        );
+        let recommendation = speculator.recommend();
 
-        for recommend in recommendations.into_iter() {
-            let order = recommend.incomplete_myorder();
-
+        for order in recommendation
+            .recommend_orders(&base_balance, &quote_balance)
+            .iter()
+        {
             let base_diff = match order.side {
-                OrderSide::Buy => order.base_quantity * (1.0 - fee_ratio),
+                OrderSide::Buy => order.base_quantity * (1.0 - fee_ratio) as Amount,
                 OrderSide::Sell => -order.base_quantity,
             };
             let quote_diff = match order.side {
                 OrderSide::Buy => -order.quote_quantity,
-                OrderSide::Sell => order.quote_quantity * (1.0 - fee_ratio),
+                OrderSide::Sell => order.quote_quantity * (1.0 - fee_ratio) as Amount,
             };
 
+            // Balance must no be negative
+            let base_available = base_balance.available;
+            if base_available + base_diff < 0.0 {
+                warn!(
+                    LOGGER,
+                    "Too much sell. available: {}, order: {:?}", base_available, order
+                );
+                continue;
+            }
+            let quote_available = quote_balance.available;
+            if quote_available + quote_diff < 0.0 {
+                warn!(
+                    LOGGER,
+                    "Too much buy. available: {}, order: {:?}", quote_available, order
+                );
+                continue;
+            }
+
+            // Update
             current_balances
                 .get_mut(&base.currency_id)
                 .unwrap()
@@ -334,7 +305,7 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
 
             info!(
                 LOGGER,
-                "Market:{}-{} Order:{:?}-{:?} price: {}, base_diff:{} quote_diff:{} Reason:{}",
+                "Market:{}-{} Order:{:?}-{:?} price: {}, base_diff:{}, quote_diff:{}",
                 base.symbol,
                 quote.symbol,
                 order.order_type,
@@ -342,8 +313,23 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
                 order.price,
                 base_diff,
                 quote_diff,
-                recommend.description().reason()
             );
+        }
+
+        let recommendation_type = recommendation.recommendation_type();
+        match recommendation_type {
+            RecommendationType::Buy | RecommendationType::Sell => {
+                info!(LOGGER, "{:?} reasons:", recommendation_type);
+                for r in recommendation.source_recommendations() {
+                    info!(LOGGER, "{}", r.reason());
+                }
+            }
+            RecommendationType::Pending | RecommendationType::Neutral => {
+                debug!(LOGGER, "{:?} reasons:", recommendation_type);
+                for r in recommendation.source_recommendations() {
+                    debug!(LOGGER, "{}", r.reason());
+                }
+            }
         }
     }
 

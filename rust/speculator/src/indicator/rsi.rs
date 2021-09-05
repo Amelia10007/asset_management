@@ -1,6 +1,6 @@
-use crate::chart::{CandleStick, Price, PriceStamp};
+use super::chart::{CandleStick, Price, PriceStamp};
 use apply::Apply;
-pub use chrono::Duration;
+use chrono::Duration;
 use chrono::DurationRound;
 use common::alias::BoxErr;
 use itertools::Itertools;
@@ -27,6 +27,12 @@ pub struct Rsi {
 }
 
 impl Rsi {
+    pub fn from_percent(percent: f64) -> Self {
+        Self {
+            rsi: percent / 100.0,
+        }
+    }
+
     pub fn percent(&self) -> f64 {
         self.rsi * 100.0
     }
@@ -99,6 +105,10 @@ impl<T> RsiHistory<T> {
 
     pub fn candlestick_span(&self) -> Duration {
         self.candlestick_span
+    }
+
+    pub fn candlestick_required_count(&self) -> usize {
+        self.candlestick_required_count
     }
 
     pub fn update(&mut self, price_stamp: PriceStamp<T>) -> Result<(), BoxErr>

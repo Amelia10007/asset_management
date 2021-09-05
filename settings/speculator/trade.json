@@ -1,0 +1,12 @@
+{
+    "buyTrigger": 0.5,
+    "sellTrigger": 0.5,
+    "buyQuantityRatio": 0.5,
+    "sellQuantityRatio": 0.5,
+    "marketRatio": 0.5,
+    "limitRatio": 0.5,
+    "buyMarketAllowableDiffRatio": 1.005,
+    "sellMarketAllowableDiffRatio": 0.995,
+    "buyLimitDiffRatio": 1.005,
+    "sellLimitDiffRatio": 0.995
+}

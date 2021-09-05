@@ -1,0 +1,186 @@
+use super::*;
+use crate::indicator::chart::PriceStamp;
+use crate::indicator::rsi::{Rsi, RsiHistory, RsiStamp};
+pub use chrono::{DateTime, Utc};
+use database::model::*;
+use itertools::Itertools;
+use tuple_map::*;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RsiCrossParameter {
+    pub candlestick_timespan: Duration,
+    pub candlestick_required_count: usize,
+    pub buy: Rsi,
+    pub sell: Rsi,
+    pub upper_pending: Rsi,
+    pub lower_pending: Rsi,
+}
+
+impl RsiCrossParameter {
+    pub fn new(
+        candlestick_timespan: Duration,
+        candlestick_required_count: usize,
+        buy: Rsi,
+        sell: Rsi,
+        upper_pending: Rsi,
+        lower_pending: Rsi,
+    ) -> Self {
+        Self {
+            candlestick_timespan,
+            candlestick_required_count,
+            buy,
+            sell,
+            upper_pending,
+            lower_pending,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RsiCrossRule {
+    market: Market,
+    parameter: RsiCrossParameter,
+    market_states: Vec<MarketState>,
+    rsi_history: RsiHistory<DateTime<Utc>>,
+}
+
+impl RsiCrossRule {
+    pub fn new(market: Market, parameter: RsiCrossParameter) -> Self {
+        let rsi_history = RsiHistory::new(
+            parameter.candlestick_timespan,
+            parameter.candlestick_required_count,
+        );
+        Self {
+            market,
+            parameter,
+            market_states: vec![],
+            rsi_history,
+        }
+    }
+}
+
+impl Rule for RsiCrossRule {
+    fn market(&self) -> Market {
+        self.market.clone()
+    }
+
+    fn duration_requirement(&self) -> Option<Duration> {
+        let h = &self.rsi_history;
+        let d = h.candlestick_span() * (h.candlestick_required_count() as i32 + 1);
+        Some(d)
+    }
+
+    fn update_market_state(&mut self, mut market_state: MarketState) -> Result<(), RuleError> {
+        if !self.is_correct_market_state(&market_state) {
+            return Err(RuleError::MarketConstraint);
+        }
+
+        // Deny older timestamp data
+        if let Some(last_state) = self.market_states.last() {
+            if last_state.stamp.timestamp >= market_state.stamp.timestamp {
+                return Err(RuleError::StampConstraint);
+            }
+        }
+
+        let price_stamp = PriceStamp::new(
+            DateTime::from_utc(market_state.stamp.timestamp, Utc),
+            market_state.price.amount as f64,
+        );
+
+        self.rsi_history
+            .update(price_stamp)
+            .map_err(RuleError::Other)?;
+
+        // Drop needless myorder data for RSI-based speculation
+        market_state
+            .myorders
+            .retain(|m| m.state == OrderState::Opened);
+
+        self.market_states.push(market_state);
+
+        Ok(())
+    }
+
+    fn recommend(&self) -> Box<dyn Recommendation> {
+        let (prev, current) = self
+            .rsi_history
+            .rsis()
+            .tuple_windows()
+            .last()
+            .unwrap_or((None, None))
+            .map(|opt| opt.map(RsiStamp::rsi));
+        let p = self.parameter;
+
+        let recommendation = match (prev, current) {
+            (Some(prev), Some(current)) if prev < p.buy && current >= p.buy => {
+                RsiCrossRecommendation::Buy(prev, current, p)
+            }
+            (Some(prev), Some(current)) if prev > p.sell && current <= p.sell => {
+                RsiCrossRecommendation::Sell(prev, current, p)
+            }
+            (_, Some(current)) if current > p.upper_pending => {
+                RsiCrossRecommendation::Pending(current, p)
+            }
+            (_, Some(current)) if current < p.lower_pending => {
+                RsiCrossRecommendation::Pending(current, p)
+            }
+            _ => RsiCrossRecommendation::Neutral(p),
+        };
+
+        Box::from(recommendation)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RsiCrossRecommendation {
+    Buy(Rsi, Rsi, RsiCrossParameter),
+    Sell(Rsi, Rsi, RsiCrossParameter),
+    Pending(Rsi, RsiCrossParameter),
+    Neutral(RsiCrossParameter),
+}
+
+impl RsiCrossRecommendation {
+    fn reason_header(&self) -> String {
+        use RsiCrossRecommendation::*;
+
+        let parameter = match self {
+            Buy(_, _, p) | Sell(_, _, p) | Pending(_, p) | Neutral(p) => p,
+        };
+
+        format!(
+            "Rsi({}m {}x): ",
+            parameter.candlestick_timespan.num_minutes(),
+            parameter.candlestick_required_count
+        )
+    }
+}
+
+impl Recommendation for RsiCrossRecommendation {
+    fn recommendation_type(&self) -> RecommendationType {
+        use RsiCrossRecommendation::*;
+
+        match self {
+            Buy(..) => RecommendationType::Buy,
+            Sell(..) => RecommendationType::Sell,
+            Pending(..) => RecommendationType::Pending,
+            Neutral(..) => RecommendationType::Neutral,
+        }
+    }
+
+    fn reason(&self) -> String {
+        use RsiCrossRecommendation::*;
+
+        let mut header = self.reason_header();
+
+        let description = match self {
+            Buy(prev, current, _) | Sell(prev, current, _) => {
+                format!("{}->{}", prev.percent(), current.percent()).into()
+            }
+            Pending(current, _) => format!("{}", current.percent()).into(),
+            Neutral(_) => String::from("trigger condition is not satisfied"),
+        };
+
+        header.push_str(&description);
+        header
+    }
+}

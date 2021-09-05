@@ -1,0 +1,64 @@
+{
+    "rules": [
+        {
+            "algorithm": "rsiCross",
+            "weight": 0.5,
+            "pairs": [
+                "BTC-USDT",
+                "ETH-USDT",
+                "LTC-USDT",
+                "XRP-USDT",
+                "RVN-USDT",
+                "FTM-USDT",
+                "SUSHI-USDT",
+                "ETH-BTC",
+                "LTC-BTC",
+                "XRP-BTC",
+                "RVN-BTC",
+                "MATIC-BTC",
+                "XLM-BTC",
+                "UNI-BTC",
+                "OCEAN-BTC"
+            ],
+            "candlestickTimespanMin": 60,
+            "candlestickCount": 14,
+            "buyTrigger": 30.0,
+            "sellTrigger": 70.0,
+            "upperPendingTrigger": 70.0,
+            "lowerPendingTrigger": 30.0
+        },
+        {
+            "algorithm": "rsiCross",
+            "weight": 0.5,
+            "pairs": [
+                "BTC-USDT",
+                "ETH-USDT",
+                "LTC-USDT",
+                "XRP-USDT",
+                "RVN-USDT",
+                "FTM-USDT",
+                "SUSHI-USDT",
+                "ETH-BTC",
+                "LTC-BTC",
+                "XRP-BTC",
+                "RVN-BTC",
+                "MATIC-BTC",
+                "XLM-BTC",
+                "UNI-BTC",
+                "OCEAN-BTC"
+            ],
+            "candlestickTimespanMin": 240,
+            "candlestickCount": 14,
+            "buyTrigger": 30.0,
+            "sellTrigger": 70.0,
+            "upperPendingTrigger": 70.0,
+            "lowerPendingTrigger": 30.0
+        },
+        {
+            "algorithm": "fixed",
+            "weight": 0.0,
+            "pairs": [],
+            "side": "sell"
+        }
+    ]
+}
