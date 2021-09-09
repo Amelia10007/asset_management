@@ -340,6 +340,11 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
         },
     ) in current_balances.into_iter()
     {
+        // Omit
+        if available == 0.0 && pending == 0.0 {
+            continue;
+        }
+
         let balance_id = get_sim_next_balance_id(&balance_sim_conn);
         let balance = Balance::new(
             balance_id,
