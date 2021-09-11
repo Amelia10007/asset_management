@@ -85,10 +85,10 @@ pub struct RsiHistory<T> {
     candlestick_span: Duration,
     candlestick_required_count: usize,
     candlesticks: Vec<CandleStick<T>>,
-    candlestick_rsis: Vec<Option<RsiStamp<T>>>,
+    candlestick_rsis: Vec<RsiStamp<T>>,
     /// Prices after the last candlestick
     incomplete_history: IncompleteRsiHistory<T>,
-    incomplete_rsis: Vec<Option<RsiStamp<T>>>,
+    is_all_candlestick_determined: bool,
 }
 
 impl<T> RsiHistory<T> {
@@ -99,7 +99,7 @@ impl<T> RsiHistory<T> {
             candlesticks: vec![],
             candlestick_rsis: vec![],
             incomplete_history: IncompleteRsiHistory::new(candlestick_span),
-            incomplete_rsis: vec![],
+            is_all_candlestick_determined: false,
         }
     }
 
@@ -111,6 +111,10 @@ impl<T> RsiHistory<T> {
         self.candlestick_required_count
     }
 
+    pub fn is_all_candlestick_determined(&self) -> bool {
+        self.is_all_candlestick_determined
+    }
+
     pub fn update(&mut self, price_stamp: PriceStamp<T>) -> Result<(), BoxErr>
     where
         T: Copy + Ord + DurationRound,
@@ -120,30 +124,27 @@ impl<T> RsiHistory<T> {
             IncompleteRsiUpdate::CandlestickDetermined(stick) => {
                 // update stick analysis
                 self.candlesticks.push(stick);
-                let new_stick_rsi = self.calculate_rsi(false);
-                self.candlestick_rsis.push(new_stick_rsi);
-
-                // clear incomplete analysis
-                self.incomplete_rsis.clear();
+                if let Some(rsi) = self.calculate_rsi() {
+                    self.candlestick_rsis.push(rsi);
+                    self.is_all_candlestick_determined = true;
+                } else {
+                    self.is_all_candlestick_determined = false;
+                }
+                Ok(())
             }
-            IncompleteRsiUpdate::ToBeContinued => {}
-            IncompleteRsiUpdate::Err(e) => return Err(e),
+            IncompleteRsiUpdate::ToBeContinued => {
+                self.is_all_candlestick_determined = false;
+                Ok(())
+            }
+            IncompleteRsiUpdate::Err(e) => Err(e),
         }
-        // Push the latest rsi including incomplete analysis
-        let new_incomplete_rsi = self.calculate_rsi(true);
-        self.incomplete_rsis.push(new_incomplete_rsi);
-
-        Ok(())
     }
 
-    pub fn rsis(&self) -> impl Iterator<Item = Option<&RsiStamp<T>>> {
-        self.candlestick_rsis
-            .iter()
-            .chain(&self.incomplete_rsis)
-            .map(Option::as_ref)
+    pub fn rsis(&self) -> impl Iterator<Item = &RsiStamp<T>> {
+        self.candlestick_rsis.iter()
     }
 
-    fn calculate_rsi(&self, contain_incomplete_history: bool) -> Option<RsiStamp<T>>
+    fn calculate_rsi(&self) -> Option<RsiStamp<T>>
     where
         T: Copy,
     {
@@ -161,13 +162,7 @@ impl<T> RsiHistory<T> {
             .rev()
             .map(CandleStick::open);
 
-        if contain_incomplete_history {
-            target_sticks
-                .chain(&self.incomplete_history.prices)
-                .apply(Self::calculate_rsi_of)
-        } else {
-            target_sticks.apply(Self::calculate_rsi_of)
-        }
+        target_sticks.apply(Self::calculate_rsi_of)
     }
 
     fn calculate_rsi_of<'a>(
@@ -242,6 +237,7 @@ impl<T> IncompleteRsiHistory<T> {
                 } else {
                     let stick = CandleStick::from_price_stamps(self.prices.drain(..))
                         .expect("prices must not be empty");
+                    // Clear previous prices to calulate next candlestick
                     self.prices = vec![price_stamp];
                     return IncompleteRsiUpdate::CandlestickDetermined(stick);
                 }
@@ -395,24 +391,11 @@ mod tests {
             history.update(PriceStamp::new(dt_hm(5, 0), 2.0)).unwrap();
 
             // Calculate RSI during span1~span6
-            let rsis = history.rsis().map(|rsi| rsi.cloned()).collect::<Vec<_>>();
+            let rsis = history.rsis().cloned().collect::<Vec<_>>();
             let expected = vec![
-                None,
-                None,
-                None,
-                None,
                 // Span5 rsi
-                Some(RsiStamp::new(
-                    dt_hm(0, 0),
-                    dt_hm(4, 0),
-                    Rsi { rsi: 6.0 / 12.0 },
-                )),
-                // Span6 tempolary rsi (spen6 has not finished yet)
-                Some(RsiStamp::new(
-                    dt_hm(0, 0),
-                    dt_hm(5, 0),
-                    Rsi { rsi: 7.0 / 13.0 },
-                )),
+                RsiStamp::new(dt_hm(0, 0), dt_hm(4, 0), Rsi { rsi: 6.0 / 12.0 }),
+                // Span6 rsi has not determined yet
             ];
             assert_eq!(expected, rsis);
 
@@ -420,29 +403,11 @@ mod tests {
             history.update(PriceStamp::new(dt_hm(5, 30), 3.0)).unwrap();
 
             // Re-acquire rsi sequence
-            let rsis = history.rsis().map(|rsi| rsi.cloned()).collect::<Vec<_>>();
+            let rsis = history.rsis().cloned().collect::<Vec<_>>();
             let expected = vec![
-                None,
-                None,
-                None,
-                None,
                 // Span5 rsi
-                Some(RsiStamp::new(
-                    dt_hm(0, 0),
-                    dt_hm(4, 0),
-                    Rsi { rsi: 6.0 / 12.0 },
-                )),
-                // Span6 tempolary rsis (spen6 has not finished yet)
-                Some(RsiStamp::new(
-                    dt_hm(0, 0),
-                    dt_hm(5, 0),
-                    Rsi { rsi: 7.0 / 13.0 },
-                )),
-                Some(RsiStamp::new(
-                    dt_hm(0, 0),
-                    dt_hm(5, 30),
-                    Rsi { rsi: 8.0 / 14.0 },
-                )),
+                RsiStamp::new(dt_hm(0, 0), dt_hm(4, 0), Rsi { rsi: 6.0 / 12.0 }),
+                // Span6 rsi has not determined yet
             ];
 
             assert_eq!(expected, rsis);
@@ -450,30 +415,13 @@ mod tests {
             // Span7. thus, Span6 finished
             history.update(PriceStamp::new(dt_hm(6, 0), 4.0)).unwrap();
 
-            let rsis = history.rsis().map(|rsi| rsi.cloned()).collect::<Vec<_>>();
+            let rsis = history.rsis().cloned().collect::<Vec<_>>();
             let expected = vec![
-                None,
-                None,
-                None,
-                None,
                 // Span5 rsi
-                Some(RsiStamp::new(
-                    dt_hm(0, 0),
-                    dt_hm(4, 0),
-                    Rsi { rsi: 6.0 / 12.0 },
-                )),
+                RsiStamp::new(dt_hm(0, 0), dt_hm(4, 0), Rsi { rsi: 6.0 / 12.0 }),
                 // Span6 rsi
-                Some(RsiStamp::new(
-                    dt_hm(1, 0),
-                    dt_hm(5, 0),
-                    Rsi { rsi: 5.0 / 11.0 },
-                )),
-                // Span7 tempolary rsi
-                Some(RsiStamp::new(
-                    dt_hm(1, 0),
-                    dt_hm(6, 0),
-                    Rsi { rsi: 7.0 / 13.0 },
-                )),
+                RsiStamp::new(dt_hm(1, 0), dt_hm(5, 0), Rsi { rsi: 5.0 / 11.0 }),
+                // Span7 rsi has not determined yet
             ];
             assert_eq!(expected, rsis);
         }

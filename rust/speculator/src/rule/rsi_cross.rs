@@ -1,10 +1,9 @@
 use super::*;
 use crate::indicator::chart::PriceStamp;
-use crate::indicator::rsi::{Rsi, RsiHistory, RsiStamp};
+use crate::indicator::rsi::{Rsi, RsiHistory};
 pub use chrono::{DateTime, Utc};
 use database::model::*;
 use itertools::Itertools;
-use tuple_map::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RsiCrossParameter {
@@ -102,26 +101,31 @@ impl Rule for RsiCrossRule {
     }
 
     fn recommend(&self) -> Box<dyn Recommendation> {
-        let (prev, current) = self
-            .rsi_history
-            .rsis()
-            .tuple_windows()
-            .last()
-            .unwrap_or((None, None))
-            .map(|opt| opt.map(RsiStamp::rsi));
         let p = self.parameter;
 
+        // Recommend only when 2 or more candlesticks have been determined
+        let (prev, current) = match self.rsi_history.rsis().tuple_windows().last() {
+            Some((prev, current)) => (prev.rsi(), current.rsi()),
+            None => return Box::from(RsiCrossRecommendation::RsiUndetermined(p)),
+        };
+
+        // Recommend only when candlestick is determined just now.
+        // This condition prevents continuous recommendation by launch-by-launch this rule.
+        if !self.rsi_history.is_all_candlestick_determined() {
+            return Box::from(RsiCrossRecommendation::RsiUndetermined(p));
+        }
+
         let recommendation = match (prev, current) {
-            (Some(prev), Some(current)) if prev < p.buy && current >= p.buy => {
+            (prev, current) if prev < p.buy && current >= p.buy => {
                 RsiCrossRecommendation::Buy(prev, current, p)
             }
-            (Some(prev), Some(current)) if prev > p.sell && current <= p.sell => {
+            (prev, current) if prev > p.sell && current <= p.sell => {
                 RsiCrossRecommendation::Sell(prev, current, p)
             }
-            (_, Some(current)) if current > p.upper_pending => {
+            (_, current) if current > p.upper_pending => {
                 RsiCrossRecommendation::Pending(current, p)
             }
-            (_, Some(current)) if current < p.lower_pending => {
+            (_, current) if current < p.lower_pending => {
                 RsiCrossRecommendation::Pending(current, p)
             }
             _ => RsiCrossRecommendation::Neutral(p),
@@ -137,6 +141,7 @@ pub enum RsiCrossRecommendation {
     Sell(Rsi, Rsi, RsiCrossParameter),
     Pending(Rsi, RsiCrossParameter),
     Neutral(RsiCrossParameter),
+    RsiUndetermined(RsiCrossParameter),
 }
 
 impl RsiCrossRecommendation {
@@ -144,7 +149,7 @@ impl RsiCrossRecommendation {
         use RsiCrossRecommendation::*;
 
         let parameter = match self {
-            Buy(_, _, p) | Sell(_, _, p) | Pending(_, p) | Neutral(p) => p,
+            Buy(_, _, p) | Sell(_, _, p) | Pending(_, p) | Neutral(p) | RsiUndetermined(p) => p,
         };
 
         format!(
@@ -163,7 +168,7 @@ impl Recommendation for RsiCrossRecommendation {
             Buy(..) => RecommendationType::Buy,
             Sell(..) => RecommendationType::Sell,
             Pending(..) => RecommendationType::Pending,
-            Neutral(..) => RecommendationType::Neutral,
+            Neutral(..) | RsiUndetermined(..) => RecommendationType::Neutral,
         }
     }
 
@@ -178,6 +183,7 @@ impl Recommendation for RsiCrossRecommendation {
             }
             Pending(current, _) => format!("{}", current.percent()).into(),
             Neutral(_) => String::from("trigger condition is not satisfied"),
+            RsiUndetermined(_) => String::from("undetermined RSI"),
         };
 
         header.push_str(&description);
