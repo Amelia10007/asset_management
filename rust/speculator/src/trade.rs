@@ -186,8 +186,8 @@ impl TradeAggregation {
                 if let Some(evaluation) = evaluation {
                     weight_sum += weight;
                     sum += evaluation * weight;
-                    recommendations.push(recommendation);
                 }
+                recommendations.push(recommendation);
             }
 
             let mean = sum / weight_sum;
