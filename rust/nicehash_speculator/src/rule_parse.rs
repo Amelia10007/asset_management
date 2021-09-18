@@ -11,7 +11,8 @@ use json::JsonValue;
 use option_inspect::OptionInspectNone;
 use speculator::indicator::rsi::Rsi;
 use speculator::rule::fixed::FixedRule;
-use speculator::rule::rsi_cross::{RsiCrossParameter, RsiCrossRule};
+use speculator::rule::rsi_cross::*;
+use speculator::rule::rsi_divergence::*;
 use speculator::trade::WeightedRule;
 use speculator::Duration;
 use std::collections::HashMap;
@@ -47,6 +48,9 @@ impl RuleSetting {
                 }
                 Some("rsiCross") => {
                     parse_rsi_cross_rule(rule_json, currency_collection, market_collection)
+                }
+                Some("rsiDivergence") => {
+                    parse_rsi_divergence_rule(rule_json, currency_collection, market_collection)
                 }
                 Some(s) => Err(format!("Unknown algorithm: {}", s).into()),
                 None => Err("Unspecified algorithm".into()),
@@ -120,6 +124,56 @@ fn parse_rsi_cross_rule(
         .cloned()
         .filter_map(move |market| {
             let rule = RsiCrossRule::new(market, parameter);
+            WeightedRule::new(rule, weight)
+                .inspect_none(|| warn!(LOGGER, "Invalid rule weight: {}", weight))
+        })
+        .collect_vec()
+        .apply(Ok)
+}
+
+fn parse_rsi_divergence_rule(
+    json: &JsonValue,
+    currency_collection: &CurrencyCollection,
+    market_collection: &MarketCollection,
+) -> Result<Vec<WeightedRule>> {
+    let weight = json["weight"].as_f64().ok_opt("weight undefined")?;
+    let parameter = {
+        let candlestick_timespan = json["candlestickTimespanMin"]
+            .as_i64()
+            .ok_opt("Invalid candlestickTimespanMin")?
+            .apply(Duration::minutes);
+        let candlestick_count = json["candlestickCount"]
+            .as_usize()
+            .ok_opt("Invalid candlestickCount")?;
+        let candlestick_maxima_interval_min = json["candleStickMaximaIntervalMin"]
+            .as_usize()
+            .ok_opt("Invalid candleStickMaximaIntervalMin")?;
+        let candlestick_maxima_interval_max = json["candleStickMaximaIntervalMax"]
+            .as_usize()
+            .ok_opt("Invalid candleStickMaximaIntervalMax")?;
+        let upper_divergence_trigger = json["upperDivergenceTrigger"]
+            .as_f64()
+            .ok_opt("Invalid upperDivergenceTrigger")?
+            .apply(Rsi::from_percent);
+        let lower_divergence_trigger = json["lowerDivergenceTrigger"]
+            .as_f64()
+            .ok_opt("Invalid lowerDivergenceTrigger")?
+            .apply(Rsi::from_percent);
+
+        let range = candlestick_maxima_interval_min..candlestick_maxima_interval_max;
+        RsiDivergenceParameter::new(
+            candlestick_timespan,
+            candlestick_count,
+            range,
+            upper_divergence_trigger,
+            lower_divergence_trigger,
+        )?
+    };
+
+    parse_markets(&json["pairs"], currency_collection, market_collection)
+        .cloned()
+        .filter_map(move |market| {
+            let rule = RsiDivergenceRule::new(market, parameter.clone());
             WeightedRule::new(rule, weight)
                 .inspect_none(|| warn!(LOGGER, "Invalid rule weight: {}", weight))
         })

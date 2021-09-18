@@ -1,5 +1,6 @@
 pub mod fixed;
 pub mod rsi_cross;
+pub mod rsi_divergence;
 
 use crate::Duration;
 use common::alias::BoxErr;

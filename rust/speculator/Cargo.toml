@@ -12,6 +12,7 @@ database = { path = "../database" }
 apply = "*"
 chrono = "*"
 itertools = "*"
+ordered-float = "*"
 
 [dev-dependencies]
 assert_approx_eq = "*"
