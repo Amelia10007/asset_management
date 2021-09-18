@@ -113,7 +113,7 @@ fn parse_rsi_cross_rule(
             sell_trigger,
             upper_pending_trigger,
             lower_pending_trigger,
-        )
+        )?
     };
 
     parse_markets(&json["pairs"], currency_collection, market_collection)

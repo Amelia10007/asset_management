@@ -6,12 +6,12 @@ use itertools::Itertools;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RsiCrossParameter {
-    pub candlestick_interval: Duration,
-    pub candlestick_required_count: usize,
-    pub buy: Rsi,
-    pub sell: Rsi,
-    pub upper_pending: Rsi,
-    pub lower_pending: Rsi,
+    candlestick_interval: Duration,
+    candlestick_required_count: usize,
+    buy: Rsi,
+    sell: Rsi,
+    upper_pending: Rsi,
+    lower_pending: Rsi,
 }
 
 impl RsiCrossParameter {
@@ -22,14 +22,21 @@ impl RsiCrossParameter {
         sell: Rsi,
         upper_pending: Rsi,
         lower_pending: Rsi,
-    ) -> Self {
-        Self {
-            candlestick_interval,
-            candlestick_required_count,
-            buy,
-            sell,
-            upper_pending,
-            lower_pending,
+    ) -> Result<Self, BoxErr> {
+        if candlestick_interval <= Duration::zero() {
+            Err("candlestick_interval must be positive".into())
+        } else if candlestick_required_count <= 0 {
+            Err("candlestick_required_count must be positive".into())
+        } else {
+            let parameter = Self {
+                candlestick_interval,
+                candlestick_required_count,
+                buy,
+                sell,
+                upper_pending,
+                lower_pending,
+            };
+            Ok(parameter)
         }
     }
 }
@@ -43,10 +50,9 @@ pub struct RsiCrossRule {
 }
 
 impl RsiCrossRule {
-    /// # Panics
-    /// 1. Panics if `parameter.candlestick_required_count` is 0
-    /// 1. Panics under negative `parameter.interval`
     pub fn new(market: Market, parameter: RsiCrossParameter) -> Self {
+        // Parameter holds RsiHistory's constraint by RsiCrossParameter::new(),
+        // so no panic occurs
         let rsi_history = RsiHistory::new(
             parameter.candlestick_interval,
             parameter.candlestick_required_count,
