@@ -1,13 +1,12 @@
 use super::*;
 use crate::indicator::chart::PriceStamp;
-use crate::indicator::rsi::{Rsi, RsiHistory};
-pub use chrono::{DateTime, Utc};
+use crate::indicator::rsi::{Rsi, RsiHistory, RsiStamp};
 use database::model::*;
 use itertools::Itertools;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RsiCrossParameter {
-    pub candlestick_timespan: Duration,
+    pub candlestick_interval: Duration,
     pub candlestick_required_count: usize,
     pub buy: Rsi,
     pub sell: Rsi,
@@ -17,7 +16,7 @@ pub struct RsiCrossParameter {
 
 impl RsiCrossParameter {
     pub fn new(
-        candlestick_timespan: Duration,
+        candlestick_interval: Duration,
         candlestick_required_count: usize,
         buy: Rsi,
         sell: Rsi,
@@ -25,7 +24,7 @@ impl RsiCrossParameter {
         lower_pending: Rsi,
     ) -> Self {
         Self {
-            candlestick_timespan,
+            candlestick_interval,
             candlestick_required_count,
             buy,
             sell,
@@ -40,13 +39,16 @@ pub struct RsiCrossRule {
     market: Market,
     parameter: RsiCrossParameter,
     market_states: Vec<MarketState>,
-    rsi_history: RsiHistory<DateTime<Utc>>,
+    rsi_history: RsiHistory,
 }
 
 impl RsiCrossRule {
+    /// # Panics
+    /// 1. Panics if `parameter.candlestick_required_count` is 0
+    /// 1. Panics under negative `parameter.interval`
     pub fn new(market: Market, parameter: RsiCrossParameter) -> Self {
         let rsi_history = RsiHistory::new(
-            parameter.candlestick_timespan,
+            parameter.candlestick_interval,
             parameter.candlestick_required_count,
         );
         Self {
@@ -65,7 +67,7 @@ impl Rule for RsiCrossRule {
 
     fn duration_requirement(&self) -> Option<Duration> {
         let h = &self.rsi_history;
-        let d = h.candlestick_span() * (h.candlestick_required_count() as i32 + 1);
+        let d = h.candlestick_interval() * (h.candlestick_required_count() as i32 + 1);
         Some(d)
     }
 
@@ -82,7 +84,7 @@ impl Rule for RsiCrossRule {
         }
 
         let price_stamp = PriceStamp::new(
-            DateTime::from_utc(market_state.stamp.timestamp, Utc),
+            market_state.stamp.timestamp,
             market_state.price.amount as f64,
         );
 
@@ -104,28 +106,31 @@ impl Rule for RsiCrossRule {
         let p = self.parameter;
 
         // Recommend only when 2 or more candlesticks have been determined
-        let (prev, current) = match self.rsi_history.rsis().tuple_windows().last() {
-            Some((prev, current)) => (prev.rsi(), current.rsi()),
+        let (prev, current) = match self.rsi_history.rsis().iter().tuple_windows().last() {
+            Some((prev, current)) => (
+                prev.as_ref().map(RsiStamp::rsi),
+                current.as_ref().map(RsiStamp::rsi),
+            ),
             None => return Box::from(RsiCrossRecommendation::RsiUndetermined(p)),
         };
 
         // Recommend only when candlestick is determined just now.
         // This condition prevents continuous recommendation by launch-by-launch this rule.
-        if !self.rsi_history.is_all_candlestick_determined() {
+        if !self.rsi_history.is_candlestick_determined_just_now() {
             return Box::from(RsiCrossRecommendation::RsiUndetermined(p));
         }
 
         let recommendation = match (prev, current) {
-            (prev, current) if prev < p.buy && current >= p.buy => {
+            (Some(prev), Some(current)) if prev < p.buy && current >= p.buy => {
                 RsiCrossRecommendation::Buy(prev, current, p)
             }
-            (prev, current) if prev > p.sell && current <= p.sell => {
+            (Some(prev), Some(current)) if prev > p.sell && current <= p.sell => {
                 RsiCrossRecommendation::Sell(prev, current, p)
             }
-            (_, current) if current > p.upper_pending => {
+            (_, Some(current)) if current > p.upper_pending => {
                 RsiCrossRecommendation::Pending(current, p)
             }
-            (_, current) if current < p.lower_pending => {
+            (_, Some(current)) if current < p.lower_pending => {
                 RsiCrossRecommendation::Pending(current, p)
             }
             _ => RsiCrossRecommendation::Neutral(p),
@@ -154,7 +159,7 @@ impl RsiCrossRecommendation {
 
         format!(
             "Rsi({}m {}x): ",
-            parameter.candlestick_timespan.num_minutes(),
+            parameter.candlestick_interval.num_minutes(),
             parameter.candlestick_required_count
         )
     }

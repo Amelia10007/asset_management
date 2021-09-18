@@ -1,7 +1,7 @@
 pub mod fixed;
 pub mod rsi_cross;
 
-pub use chrono::Duration;
+use crate::Duration;
 use common::alias::BoxErr;
 pub use database::model::*;
 use std::fmt::{self, Display, Formatter};
