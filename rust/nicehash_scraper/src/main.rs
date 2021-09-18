@@ -318,5 +318,9 @@ fn main() {
         Err(e) => warn!(LOGGER, "Can't list myorder-fetch target markets: {}", e),
     }
 
-    info!(LOGGER, "Nicehash scraper finished");
+    info!(
+        LOGGER,
+        "Nicehash scraper finished at {}",
+        chrono::Local::now()
+    );
 }

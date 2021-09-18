@@ -397,5 +397,9 @@ fn main() {
         error!(LOGGER, "{}", e);
     }
 
-    info!(LOGGER, "Nicehash speculator finished");
+    info!(
+        LOGGER,
+        "Nicehash speculator finished at {}",
+        chrono::Local::now()
+    );
 }
