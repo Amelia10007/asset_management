@@ -387,14 +387,11 @@ fn batch() -> Result<()> {
 fn main() {
     dotenv::dotenv().ok();
 
-    let now = match nicehash::api_common::fetch_server_time() {
-        Ok(now) => now,
-        Err(e) => {
-            error!(LOGGER, "Can't fetch nicehash server time: {}", e);
-            return;
-        }
-    };
-    info!(LOGGER, "Nicehash speculator started at {}", now);
+    info!(
+        LOGGER,
+        "Nicehash speculator started at {}",
+        chrono::Local::now()
+    );
 
     if let Err(e) = batch() {
         error!(LOGGER, "{}", e);

@@ -12,6 +12,7 @@ database = { path = "../database" }
 nicehash = { path = "../nicehash" }
 speculator = { path = "../speculator" }
 apply = "*"
+chrono = "*"
 # libmysqlclient-dev is required
 diesel = { version = "1", features = ["mysql", "chrono"] }
 dotenv = "*"

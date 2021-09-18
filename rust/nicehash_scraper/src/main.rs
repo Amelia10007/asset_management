@@ -84,13 +84,7 @@ fn main() {
         }
     };
 
-    let now = match nicehash::api_common::fetch_server_time() {
-        Ok(now) => now,
-        Err(e) => {
-            error!(LOGGER, "Can't fetch nicehash server time: {}", e);
-            return;
-        }
-    };
+    let now = chrono::Local::now();
     info!(LOGGER, "Nicehash scraper started at {}", now);
 
     let conn = match connect_db() {
@@ -101,7 +95,7 @@ fn main() {
         }
     };
 
-    let stamp = match add_stamp(&conn, now) {
+    let stamp = match add_stamp(&conn, now.naive_utc()) {
         Ok(stamp) => stamp,
         Err(e) => {
             error!(LOGGER, "Can't add timestamp to local DB: {}", e);
