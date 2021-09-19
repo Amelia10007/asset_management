@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
 pub mod prelude {
@@ -95,29 +94,16 @@ impl LogLevel {
     }
 }
 
-pub struct Logger<'a, W> {
+pub struct Logger<W> {
     dest: Arc<Mutex<W>>,
     minimum_log_level: LogLevel,
-    indent: usize,
-    _phantom: PhantomData<&'a ()>,
 }
 
-impl<'a, W> Logger<'a, W> {
+impl<W> Logger<W> {
     pub fn new(dest: W, minimum_log_level: LogLevel) -> Self {
         Self {
             dest: Arc::new(Mutex::new(dest)),
             minimum_log_level,
-            indent: 0,
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn child(&mut self) -> Logger<'_, W> {
-        Logger {
-            dest: self.dest.clone(),
-            minimum_log_level: self.minimum_log_level,
-            indent: self.indent + 1,
-            _phantom: PhantomData,
         }
     }
 
@@ -127,10 +113,7 @@ impl<'a, W> Logger<'a, W> {
         T: std::fmt::Display,
     {
         if level >= self.minimum_log_level {
-            let indent = std::iter::repeat(' ')
-                .take(self.indent * 2)
-                .collect::<String>();
-            let content = format!("{}[{}] {}", indent, level.header(), message);
+            let content = format!("[{}] {}", level.header(), message);
             let mut guard = self.dest.lock().unwrap();
             write!(&mut *guard, "{}", content)
         } else {
@@ -224,22 +207,5 @@ mod tests {
         debug!(logger, "Alice: {}", "oops");
 
         assert_eq!("[Debug] Alice: oops\n", dest.logs[0].as_str());
-    }
-
-    #[test]
-    fn test_children() {
-        let mut dest = Dest::new();
-        let mut logger = Logger::new(&mut dest, LogLevel::Info);
-        info!(logger, "parent");
-
-        let mut child = logger.child();
-        warn!(child, "child");
-
-        let grandchild = child.child();
-        error!(grandchild, "grandchild");
-
-        assert_eq!("[Info] parent\n", dest.logs[0].as_str());
-        assert_eq!("  [Warn] child\n", dest.logs[1].as_str());
-        assert_eq!("    [Error] grandchild\n", dest.logs[2].as_str());
     }
 }
