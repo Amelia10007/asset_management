@@ -11,3 +11,15 @@ macro_rules! id_type {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    id_type!(AwesomeType);
+
+    #[test]
+    fn test_id() {
+        let id = AwesomeType::new(42);
+
+        assert_eq!(42, id.0);
+    }
+}
