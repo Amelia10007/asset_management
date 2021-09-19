@@ -16,8 +16,9 @@ chrono = "*"
 # libmysqlclient-dev is required
 diesel = { version = "1", features = ["mysql", "chrono"] }
 dotenv = "*"
+env_logger = "*"
 itertools = "*"
 json = "*"
-once_cell = "*"
+log = "*"
 option-inspect = "*"
 reqwest = { version = "*", features = ["blocking"] }

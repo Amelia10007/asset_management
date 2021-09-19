@@ -1,29 +1,14 @@
 use apply::Apply;
 use common::alias::BoxErr;
 use common::alias::Result;
-use common::log::prelude::*;
 use database::logic::*;
 use database::model::*;
 use diesel::prelude::*;
 use nicehash::api_common::ApiKey;
-use once_cell::sync::Lazy;
 use std::env;
-use std::io::{stdout, Stdout};
 use std::str::FromStr;
-
-static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
-    let level = match env::var("SCRAPER_LOGGER_LEVEL")
-        .map(|s| s.to_lowercase())
-        .as_deref()
-    {
-        Ok("error") => LogLevel::Error,
-        Ok("warn") => LogLevel::Warning,
-        Ok("info") => LogLevel::Info,
-        Ok("debug") => LogLevel::Debug,
-        _ => LogLevel::Debug,
-    };
-    Logger::new(stdout(), level)
-});
+#[macro_use]
+extern crate log;
 
 fn connect_db() -> Result<MysqlConnection> {
     let url = env::var("DATABASE_URL")?;
@@ -70,6 +55,8 @@ fn main() {
     // Load environment variables from file '.env' in currenct dir.
     dotenv::dotenv().ok();
 
+    env_logger::init();
+
     let api_key = {
         let organization_id = env::var("NICEHASH_ORGANIZATION_ID");
         let key = env::var("NICEHASH_API_KEY");
@@ -78,19 +65,19 @@ fn main() {
         match (organization_id, key, secret_key) {
             (Ok(id), Ok(key), Ok(skey)) => ApiKey::new(id, key, skey),
             _ => {
-                error!(LOGGER, "Can't load api key from environment variable");
+                error!("Can't load api key from environment variable");
                 return;
             }
         }
     };
 
     let now = chrono::Local::now();
-    info!(LOGGER, "Nicehash scraper started at {}", now);
+    info!("Nicehash scraper started at {}", now);
 
     let conn = match connect_db() {
         Ok(conn) => conn,
         Err(e) => {
-            error!(LOGGER, "Can't connect database: {}", e);
+            error!("Can't connect database: {}", e);
             return;
         }
     };
@@ -98,7 +85,7 @@ fn main() {
     let stamp = match add_stamp(&conn, now.naive_utc()) {
         Ok(stamp) => stamp,
         Err(e) => {
-            error!(LOGGER, "Can't add timestamp to local DB: {}", e);
+            error!("Can't add timestamp to local DB: {}", e);
             return;
         }
     };
@@ -109,17 +96,17 @@ fn main() {
             Ok(currencies) => {
                 for c in currencies.into_iter() {
                     match add_currency(&conn, c.symbol.clone(), c.name.clone()) {
-                        Ok(_) => info!(LOGGER, "Add currency {}/{}", c.symbol, c.name),
+                        Ok(_) => info!("Add currency {}/{}", c.symbol, c.name),
                         Err(database::error::Error::Logic(
                             database::error::LogicError::DuplicatedCurrency,
                         )) => {}
                         Err(e) => {
-                            warn!(LOGGER, "Can't add currency: {}", e)
+                            warn!("Can't add currency: {}", e)
                         }
                     }
                 }
             }
-            Err(e) => warn!(LOGGER, "Cat't fetch currencies: {}", e),
+            Err(e) => warn!("Cat't fetch currencies: {}", e),
         }
     }
 
@@ -127,7 +114,7 @@ fn main() {
     let currency_collection = match list_currencies(&conn) {
         Ok(cs) => cs,
         Err(e) => {
-            error!(LOGGER, "Can't list currencies from database: {}", e);
+            error!("Can't list currencies from database: {}", e);
             return;
         }
     };
@@ -152,17 +139,14 @@ fn main() {
                     ) {
                         Ok(balance) => {
                             debug!(
-                                LOGGER,
                                 "Add balance: {}/{} {}",
-                                balance.available,
-                                balance.pending,
-                                currency.symbol
+                                balance.available, balance.pending, currency.symbol
                             )
                         }
-                        Err(e) => warn!(LOGGER, "Can't add balance: {}", e),
+                        Err(e) => warn!("Can't add balance: {}", e),
                     }
                 }),
-            Err(e) => warn!(LOGGER, "Can't fetch balance: {}", e),
+            Err(e) => warn!("Can't fetch balance: {}", e),
         }
     }
 
@@ -177,7 +161,7 @@ fn main() {
         let known_markets = match list_markets(&conn) {
             Ok(markets) => markets,
             Err(e) => {
-                error!(LOGGER, "Cant list markets from DB: {}", e);
+                error!("Cant list markets from DB: {}", e);
                 return;
             }
         };
@@ -197,11 +181,11 @@ fn main() {
                             Some(market) => market.clone(),
                             None => match add_market(&conn, base.currency_id, quote.currency_id) {
                                 Ok(market) => {
-                                    info!(LOGGER, "Add market: {}/{}", base.symbol, quote.symbol);
+                                    info!("Add market: {}/{}", base.symbol, quote.symbol);
                                     market
                                 }
                                 Err(e) => {
-                                    warn!(LOGGER, "Can't add currency: {}", e);
+                                    warn!("Can't add currency: {}", e);
                                     return;
                                 }
                             },
@@ -209,12 +193,12 @@ fn main() {
                     // Add price
                     match add_price(&conn, market.market_id, stamp.stamp_id, price) {
                         Ok(price) => {
-                            debug!(LOGGER, "Add price: {}/{}", price.market_id, price.amount)
+                            debug!("Add price: {}/{}", price.market_id, price.amount)
                         }
-                        Err(e) => warn!(LOGGER, "Can't add price: {}", e),
+                        Err(e) => warn!("Can't add price: {}", e),
                     }
                 }),
-            Err(e) => warn!(LOGGER, "Can't fetch markets and prices: {}", e),
+            Err(e) => warn!("Can't fetch markets and prices: {}", e),
         }
     }
 
@@ -222,7 +206,7 @@ fn main() {
     let known_markets = match list_markets(&conn) {
         Ok(markets) => markets,
         Err(e) => {
-            error!(LOGGER, "Cant list markets from DB: {}", e);
+            error!("Cant list markets from DB: {}", e);
             return;
         }
     };
@@ -250,21 +234,21 @@ fn main() {
                                         orderbook.volume,
                                     ) {
                                         Ok(o) => {
-                                            debug!(LOGGER, "Add orderbook. id: {}", o.orderbook_id)
+                                            debug!("Add orderbook. id: {}", o.orderbook_id)
                                         }
-                                        Err(e) => warn!(LOGGER, "Can't add orderbook: {}", e),
+                                        Err(e) => warn!("Can't add orderbook: {}", e),
                                     }
                                 }
                             }
-                            Err(e) => warn!(LOGGER, "Can't fetch orderbook: {}", e),
+                            Err(e) => warn!("Can't fetch orderbook: {}", e),
                         }
                     }
                 }
 
-                Err(e) => warn!(LOGGER, "Can't load orderbook-fetch count: {}", e),
+                Err(e) => warn!("Can't load orderbook-fetch count: {}", e),
             }
         }
-        Err(e) => warn!(LOGGER, "Can't list orderbook-fetch target markets: {}", e),
+        Err(e) => warn!("Can't list orderbook-fetch target markets: {}", e),
     }
 
     // Add target markets' my orders
@@ -298,29 +282,24 @@ fn main() {
                                         myorder.state,
                                     ) {
                                         Ok(_) => debug!(
-                                            LOGGER,
                                             "Add or update myorder transaction: {}",
                                             myorder.transaction_id
                                         ),
                                         Err(e) => {
-                                            warn!(LOGGER, "Can't add or update myorder: {}", e)
+                                            warn!("Can't add or update myorder: {}", e)
                                         }
                                     }
                                 }
                             }
-                            Err(e) => warn!(LOGGER, "Can't fetch myorder: {}", e),
+                            Err(e) => warn!("Can't fetch myorder: {}", e),
                         }
                     }
                 }
-                Err(e) => warn!(LOGGER, "Can't load myorder-fetch count: {}", e),
+                Err(e) => warn!("Can't load myorder-fetch count: {}", e),
             }
         }
-        Err(e) => warn!(LOGGER, "Can't list myorder-fetch target markets: {}", e),
+        Err(e) => warn!("Can't list myorder-fetch target markets: {}", e),
     }
 
-    info!(
-        LOGGER,
-        "Nicehash scraper finished at {}",
-        chrono::Local::now()
-    );
+    info!("Nicehash scraper finished at {}", chrono::Local::now());
 }

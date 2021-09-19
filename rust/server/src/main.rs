@@ -1,38 +1,22 @@
 use apply::{Also, Apply};
 use common::alias::{BoxErr, Result};
-use common::log::prelude::*;
 use hyper::server::Server;
 use hyper::service::*;
 use hyper::{Body, Request, Response, Uri};
 use json::JsonValue;
-use once_cell::sync::Lazy;
 use std::env;
-use std::io::{stdout, Read, Stdout};
+use std::io::Read;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+#[macro_use]
+extern crate log;
 
 mod api;
 mod exchange_graph;
 
-use crate::api::api_balance_history;
-
 pub type HttpQuery<'a> = common::http_query::HttpQuery<&'a str, &'a str>;
-
-static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
-    let level = match env::var("SERVER_LOGGER_LEVEL")
-        .map(|s| s.to_lowercase())
-        .as_deref()
-    {
-        Ok("error") => LogLevel::Error,
-        Ok("warn") => LogLevel::Warning,
-        Ok("info") => LogLevel::Info,
-        Ok("debug") => LogLevel::Debug,
-        _ => LogLevel::Debug,
-    };
-    Logger::new(stdout(), level)
-});
 
 enum ContentType<'a> {
     Static(&'a str),
@@ -50,7 +34,7 @@ impl<'a> ContentType<'a> {
         if path.starts_with("api/") {
             let api_path = &path["api/".len()..];
             match api_path {
-                "balance_history" => Ok(ApiCall(query, api_balance_history)),
+                "balance_history" => Ok(ApiCall(query, api::api_balance_history)),
                 _ => Err(BoxErr::from(format!("Invalid api path: {}", api_path))),
             }
         } else {
@@ -72,7 +56,7 @@ impl<'a> ContentType<'a> {
             Static(path) => match read_bytes_from_file(path) {
                 Ok(content) => content,
                 Err(e) => {
-                    warn!(LOGGER, "Failed to load static file {}: {}", path, e);
+                    warn!("Failed to load static file {}: {}", path, e);
                     "<html><body>An error occurred during dealing with http request <a href=\"index.html\">index</a></body></html>"
                     .as_bytes().to_vec()
                 }
@@ -81,7 +65,7 @@ impl<'a> ContentType<'a> {
                 let json = match f(query) {
                     Ok(json) => json,
                     Err(e) => {
-                        warn!(LOGGER, "API failure: {}", e);
+                        warn!("API failure: {}", e);
                         JsonValue::new_object().also(|json| json["success"] = false.into())
                     }
                 };
@@ -95,7 +79,7 @@ async fn handle(req: Request<Body>) -> Result<Response<Body>> {
     let content = match ContentType::parse_uri(req.uri()).map(ContentType::render) {
         Ok(content) => content,
         Err(e) => {
-            warn!(LOGGER, "{}", e);
+            warn!("{}", e);
             "<html><body>An error occurred during parsing http request <a href=\"index.html\">index</a></body></html>"
             .as_bytes().to_vec()
         }
@@ -110,7 +94,7 @@ fn read_bytes_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
         .apply(PathBuf::from)
         .apply_ref(|p| p.join(path));
 
-    debug!(LOGGER, "Read file: {:?}", path);
+    debug!("Read file: {:?}", path);
 
     let mut file = std::fs::File::open(path)?;
     let mut bytes = vec![];
@@ -122,6 +106,7 @@ fn read_bytes_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
+    env_logger::try_init().ok();
 
     let addr = match env::var("SERVER_ADDRESS")
         .map_err(BoxErr::from)
@@ -129,7 +114,7 @@ async fn main() {
     {
         Ok(addr) => addr,
         Err(e) => {
-            error!(LOGGER, "Can't determine server address: {}", e);
+            error!("Can't determine server address: {}", e);
             return;
         }
     };

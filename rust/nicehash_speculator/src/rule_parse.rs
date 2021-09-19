@@ -1,8 +1,6 @@
-use crate::LOGGER;
 use apply::Apply;
 use common::alias::Result;
 use common::err::OkOpt;
-use common::log::prelude::*;
 use database::custom_sql_type::{MarketId, OrderSide};
 use database::logic::{CurrencyCollection, MarketCollection};
 use database::model::Market;
@@ -67,7 +65,7 @@ impl RuleSetting {
                             .push(weighted_rule);
                     }
                 }
-                Err(e) => warn!(LOGGER, "{}", e),
+                Err(e) => warn!("{}", e),
             }
         }
 
@@ -125,7 +123,7 @@ fn parse_rsi_cross_rule(
         .filter_map(move |market| {
             let rule = RsiCrossRule::new(market, parameter);
             WeightedRule::new(rule, weight)
-                .inspect_none(|| warn!(LOGGER, "Invalid rule weight: {}", weight))
+                .inspect_none(|| warn!("Invalid rule weight: {}", weight))
         })
         .collect_vec()
         .apply(Ok)
@@ -175,7 +173,7 @@ fn parse_rsi_divergence_rule(
         .filter_map(move |market| {
             let rule = RsiDivergenceRule::new(market, parameter.clone());
             WeightedRule::new(rule, weight)
-                .inspect_none(|| warn!(LOGGER, "Invalid rule weight: {}", weight))
+                .inspect_none(|| warn!("Invalid rule weight: {}", weight))
         })
         .collect_vec()
         .apply(Ok)
@@ -199,7 +197,7 @@ fn parse_fixed_rule(
         .filter_map(move |market| {
             let rule = FixedRule::new(market.clone(), side);
             WeightedRule::new(rule, weight)
-                .inspect_none(|| warn!(LOGGER, "Invalid rule weight: {}", weight))
+                .inspect_none(|| warn!("Invalid rule weight: {}", weight))
         })
         .collect_vec()
         .apply(Ok)
@@ -215,25 +213,22 @@ fn parse_markets<'a>(
         .filter_map(|str| {
             str.split('-')
                 .collect_tuple::<(_, _)>()
-                .inspect_none(|| warn!(LOGGER, "Invalid market pair: {}", str))
+                .inspect_none(|| warn!("Invalid market pair: {}", str))
         })
         .filter_map(move |(base_symbol, quote_symbol)| {
             let base = currency_collection
                 .by_symbol(base_symbol)
-                .inspect_none(|| warn!(LOGGER, "Unknown currency symbol: {}", base_symbol))?;
+                .inspect_none(|| warn!("Unknown currency symbol: {}", base_symbol))?;
             let quote = currency_collection
                 .by_symbol(quote_symbol)
-                .inspect_none(|| warn!(LOGGER, "Unknown currency symbol: {}", base_symbol))?;
+                .inspect_none(|| warn!("Unknown currency symbol: {}", base_symbol))?;
             Some((base, quote))
         })
         .filter_map(move |(base, quote)| {
             market_collection
                 .by_base_quote_id(base.currency_id, quote.currency_id)
                 .inspect_none(|| {
-                    warn!(
-                        LOGGER,
-                        "{}-{} does not exist in markets", base.symbol, quote.symbol
-                    )
+                    warn!("{}-{} does not exist in markets", base.symbol, quote.symbol)
                 })
         })
 }

@@ -6,35 +6,20 @@ use apply::Apply;
 use common::alias::BoxErr;
 use common::alias::Result;
 use common::err::OkOpt;
-use common::log::prelude::*;
 use database::logic::*;
 use database::model::*;
 use database::schema;
 use diesel::dsl::max;
 use diesel::insert_into;
 use diesel::prelude::*;
-use once_cell::sync::Lazy;
 use speculator::rule::MarketState;
 use speculator::rule::RecommendationType;
 use speculator::trade::TradeAggregation;
 use std::collections::HashMap;
 use std::env;
 use std::hash::Hash;
-use std::io::{stdout, Stdout};
-
-pub static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| {
-    let level = match env::var("SPECULATOR_LOGGER_LEVEL")
-        .map(|s| s.to_lowercase())
-        .as_deref()
-    {
-        Ok("error") => LogLevel::Error,
-        Ok("warn") => LogLevel::Warning,
-        Ok("info") => LogLevel::Info,
-        Ok("debug") => LogLevel::Debug,
-        _ => LogLevel::Debug,
-    };
-    Logger::new(stdout(), level)
-});
+#[macro_use]
+extern crate log;
 
 fn group_by<V, K, F>(iter: impl IntoIterator<Item = V>, mut f: F) -> HashMap<K, Vec<V>>
 where
@@ -58,7 +43,7 @@ fn sync_balance(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp) 
         .filter(schema::balance::stamp_id.eq(latest_main_stamp.stamp_id))
         .load::<Balance>(conn)?;
 
-    info!(LOGGER, "Sync: found {} balances in main DB", balances.len());
+    info!( "Sync: found {} balances in main DB", balances.len());
 
     for mut balance in balances.into_iter() {
         balance.balance_id = get_sim_next_balance_id(balance_sim_conn);
@@ -67,7 +52,7 @@ fn sync_balance(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp) 
             .execute(balance_sim_conn)?;
     }
 
-    info!(LOGGER, "Synced balances with main DB");
+    info!( "Synced balances with main DB");
 
     Ok(())
 }
@@ -156,7 +141,7 @@ pub fn load_market_states(
                 };
                 if let Err(errors) = aggregation.update_market_state(market_state) {
                     for e in errors.into_iter() {
-                        warn!(LOGGER, "{}", e);
+                        warn!( "{}", e);
                     }
                 }
             }
@@ -187,7 +172,7 @@ fn load_latest_sim_balances(
                 Ok(Some(balance)) => Some(balance),
                 Ok(None) => {
                     debug!(
-                        LOGGER,
+                        
                         "Currency {} is not found in simulation balances. Its balance is assumed 0",
                         c.name
                     );
@@ -197,7 +182,7 @@ fn load_latest_sim_balances(
                     Some(balance)
                 }
                 Err(e) => {
-                    warn!(LOGGER, "Can't fetch balance of currency {}: {}", c.name, e);
+                    warn!( "Can't fetch balance of currency {}: {}", c.name, e);
                     None
                 }
             }
@@ -234,28 +219,28 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
         let base = match currency_collection.by_id(market.base_id) {
             Some(base) => base,
             None => {
-                warn!(LOGGER, "Unknown base id");
+                warn!( "Unknown base id");
                 continue;
             }
         };
         let quote = match currency_collection.by_id(market.quote_id) {
             Some(quote) => quote,
             None => {
-                warn!(LOGGER, "Unknown quote id");
+                warn!( "Unknown quote id");
                 continue;
             }
         };
         let base_balance = match current_balances.get(&market.base_id).cloned() {
             Some(b) => b,
             None => {
-                warn!(LOGGER, "Currency {} is not found in balances", base.name);
+                warn!( "Currency {} is not found in balances", base.name);
                 continue;
             }
         };
         let quote_balance = match current_balances.get(&market.quote_id).cloned() {
             Some(b) => b,
             None => {
-                warn!(LOGGER, "Currency {} is not found in balances", quote.name);
+                warn!( "Currency {} is not found in balances", quote.name);
                 continue;
             }
         };
@@ -279,7 +264,7 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
             let base_available = base_balance.available;
             if base_available + base_diff < 0.0 {
                 warn!(
-                    LOGGER,
+                    
                     "Too much sell. available: {}, order: {:?}", base_available, order
                 );
                 continue;
@@ -287,7 +272,7 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
             let quote_available = quote_balance.available;
             if quote_available + quote_diff < 0.0 {
                 warn!(
-                    LOGGER,
+                    
                     "Too much buy. available: {}, order: {:?}", quote_available, order
                 );
                 continue;
@@ -304,7 +289,7 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
                 .available += quote_diff;
 
             info!(
-                LOGGER,
+                
                 "Market:{}-{} Order:{:?}-{:?} price: {}, base_diff:{}, quote_diff:{}",
                 base.symbol,
                 quote.symbol,
@@ -319,15 +304,15 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
         let recommendation_type = recommendation.recommendation_type();
         match recommendation_type {
             RecommendationType::Buy | RecommendationType::Sell => {
-                info!(LOGGER, "{:?} reasons:", recommendation_type);
+                info!( "{:?} reasons:", recommendation_type);
                 for r in recommendation.source_recommendations() {
-                    info!(LOGGER, "{}", r.reason());
+                    info!( "{}", r.reason());
                 }
             }
             RecommendationType::Pending | RecommendationType::Neutral => {
-                debug!(LOGGER, "{:?} reasons:", recommendation_type);
+                debug!( "{:?} reasons:", recommendation_type);
                 for r in recommendation.source_recommendations() {
-                    debug!(LOGGER, "{}", r.reason());
+                    debug!( "{}", r.reason());
                 }
             }
         }
@@ -357,7 +342,7 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
             .values(balance)
             .execute(balance_sim_conn)
         {
-            warn!(LOGGER, "Can't add new balance: {}", e);
+            warn!( "Can't add new balance: {}", e);
         }
     }
 
@@ -387,18 +372,20 @@ fn batch() -> Result<()> {
 fn main() {
     dotenv::dotenv().ok();
 
+    env_logger::init();
+
     info!(
-        LOGGER,
+        
         "Nicehash speculator started at {}",
         chrono::Local::now()
     );
 
     if let Err(e) = batch() {
-        error!(LOGGER, "{}", e);
+        error!( "{}", e);
     }
 
     info!(
-        LOGGER,
+        
         "Nicehash speculator finished at {}",
         chrono::Local::now()
     );

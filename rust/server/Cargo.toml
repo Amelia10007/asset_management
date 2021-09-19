@@ -9,12 +9,13 @@ edition = "2018"
 [dependencies]
 common = { path = "../common" }
 database = { path = "../database" }
-dotenv = "*"
 apply = "*"
+dotenv = "*"
+env_logger = "*"
 hyper = { version = "*", features = ["full"] }
 itertools = "*"
 iter_vals = "*"
 json = "*"
-once_cell = "*"
+log = "*"
 rayon = "*"
 tokio = { version = "*", features = ["full"] }
