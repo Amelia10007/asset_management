@@ -1,7 +1,6 @@
 use std::ops::Sub;
 use std::str::FromStr;
 
-use super::HttpQuery;
 use crate::exchange_graph::ExchangeGraph;
 use apply::Apply;
 use common::alias::Result;
@@ -14,6 +13,7 @@ use database::model::*;
 use database::schema;
 use itertools::Itertools;
 use json::JsonValue;
+use qstring::QString;
 use rayon::prelude::*;
 use std::env;
 use std::ops::Deref;
@@ -21,18 +21,18 @@ use std::rc::Rc;
 
 type Duration = <NaiveDateTime as Sub>::Output;
 
-pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
+pub fn api_balance_history(query: &QString) -> Result<JsonValue> {
     let (price_conn, balance_conn, _) = connect_db(&query)?;
 
     let timestamps = {
         let since = query
-            .get(&"since")
+            .get("since")
             .and_then(|s| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.fZ").ok());
         let until = query
-            .get(&"until")
+            .get("until")
             .and_then(|s| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.fZ").ok());
         let step = query
-            .get(&"step")
+            .get("step")
             .and_then(|s| parse_query_step(s))
             .unwrap_or(Duration::days(1));
 
@@ -41,7 +41,7 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
 
     let currency_collection = list_currencies(&price_conn)?;
 
-    let fiat_symbol = query.get(&"fiat");
+    let fiat_symbol = query.get("fiat");
     let fiat_currency = fiat_symbol
         .as_ref()
         .and_then(|symbol| currency_collection.by_symbol(symbol));
@@ -123,8 +123,8 @@ pub fn api_balance_history(query: HttpQuery<'_>) -> Result<JsonValue> {
 /// `Ok(db_conn, balance_conn)` if successfully connected.
 ///
 /// NOTE: If query specifies using simulation, `balance_conn` refers simulation DB.
-fn connect_db(query: &HttpQuery<'_>) -> Result<(Rc<Conn>, Rc<Conn>, bool)> {
-    let use_simulation_balance = matches!(query.get(&"sim"), Some(&"1"));
+fn connect_db(query: &QString) -> Result<(Rc<Conn>, Rc<Conn>, bool)> {
+    let use_simulation_balance = matches!(query.get("sim"), Some("1"));
 
     let price_conn = env::var("DATABASE_URL")?
         .deref()
@@ -208,7 +208,10 @@ fn get_target_timestamps(
     Ok(filtered_timestamps)
 }
 
-fn construct_exchange_graph(conn: &Conn, timestamp_id: StampId) -> Result<ExchangeGraph<CurrencyId>> {
+fn construct_exchange_graph(
+    conn: &Conn,
+    timestamp_id: StampId,
+) -> Result<ExchangeGraph<CurrencyId>> {
     use schema::*;
 
     let prices = price::table

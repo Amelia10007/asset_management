@@ -17,5 +17,6 @@ itertools = "*"
 iter_vals = "*"
 json = "*"
 log = "*"
+qstring = "*"
 rayon = "*"
 tokio = { version = "*", features = ["full"] }

@@ -1,14 +1,15 @@
-use apply::{Also, Apply};
+use apply::Apply;
 use common::alias::{BoxErr, Result};
 use hyper::server::Server;
 use hyper::service::*;
 use hyper::{Body, Request, Response, Uri};
 use json::JsonValue;
+use qstring::QString;
 use std::env;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 #[macro_use]
 extern crate log;
@@ -16,79 +17,27 @@ extern crate log;
 mod api;
 mod exchange_graph;
 
-pub type HttpQuery<'a> = common::http_query::HttpQuery<&'a str, &'a str>;
+fn render(uri: &Uri) -> Result<Vec<u8>> {
+    // Skip front slash
+    let path = &uri.path()[1..];
+    let query = QString::from(uri.query().unwrap_or_default());
 
-enum ContentType<'a> {
-    Static(&'a str),
-    ApiCall(HttpQuery<'a>, fn(HttpQuery<'a>) -> Result<JsonValue>),
-}
-
-impl<'a> ContentType<'a> {
-    pub fn parse_uri(uri: &'a Uri) -> Result<Self> {
-        use ContentType::*;
-
-        // Skip front slash
-        let path = &uri.path()[1..];
-        let query = HttpQuery::parse(uri.query().unwrap_or_default());
-
-        if path.starts_with("api/") {
-            let api_path = &path["api/".len()..];
-            match api_path {
-                "balance_history" => Ok(ApiCall(query, api::api_balance_history)),
-                _ => Err(BoxErr::from(format!("Invalid api path: {}", api_path))),
-            }
-        } else {
-            let is_safe_path = path
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-');
-            if is_safe_path {
-                Ok(Static(path))
-            } else {
-                Err(BoxErr::from(format!("Invalid path: {}", path)))
-            }
-        }
-    }
-
-    pub fn render(self) -> Vec<u8> {
-        use ContentType::*;
-
-        match self {
-            Static(path) => match read_bytes_from_file(path) {
-                Ok(content) => content,
-                Err(e) => {
-                    warn!("Failed to load static file {}: {}", path, e);
-                    "<html><body>An error occurred during dealing with http request <a href=\"index.html\">index</a></body></html>"
-                    .as_bytes().to_vec()
-                }
-            },
-            ApiCall(query, f) => {
-                let json = match f(query) {
-                    Ok(json) => json,
-                    Err(e) => {
-                        warn!("API failure: {}", e);
-                        JsonValue::new_object().also(|json| json["success"] = false.into())
-                    }
-                };
-                json.to_string().into_bytes()
-            }
-        }
+    if path.starts_with("api/") {
+        let api_path = &path["api/".len()..];
+        render_api(api_path, &query).map(|json| json.to_string().into_bytes())
+    } else {
+        render_file(path)
     }
 }
 
-async fn handle(req: Request<Body>) -> Result<Response<Body>> {
-    let content = match ContentType::parse_uri(req.uri()).map(ContentType::render) {
-        Ok(content) => content,
-        Err(e) => {
-            warn!("{}", e);
-            "<html><body>An error occurred during parsing http request <a href=\"index.html\">index</a></body></html>"
-            .as_bytes().to_vec()
-        }
-    };
+fn render_file(path: &str) -> Result<Vec<u8>> {
+    let is_safe_path = path
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-');
+    if !is_safe_path {
+        return Err(format!("Invalid file path: {}", path).into());
+    }
 
-    Ok(Response::new(Body::from(content)))
-}
-
-fn read_bytes_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
     let path = env::var("WEBCONTENT_ROOT")?
         .deref()
         .apply(PathBuf::from)
@@ -101,6 +50,26 @@ fn read_bytes_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
 
     file.read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+fn render_api(api_path: &str, query: &QString) -> Result<JsonValue> {
+    match api_path {
+        "balance_history" => api::api_balance_history(query),
+        other => Err(format!("Invalid api: {}", other).into()),
+    }
+}
+
+async fn handle(req: Request<Body>) -> Result<Response<Body>> {
+    let content = match render(req.uri()) {
+        Ok(content) => content,
+        Err(e) => {
+            warn!("{}", e);
+            "<html><body>An error occurred during parsing http request <a href=\"index.html\">index</a></body></html>"
+            .as_bytes().to_vec()
+        }
+    };
+
+    Ok(Response::new(Body::from(content)))
 }
 
 #[tokio::main]

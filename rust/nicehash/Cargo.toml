@@ -12,5 +12,6 @@ database = { path = "../database" }
 apply = "*"
 hmac-sha256 = "*"
 json = "*"
+qstring = "*"
 reqwest = { version = "*", features = ["blocking"] }
 uuid = { version = "*", features = ["v4"] }
