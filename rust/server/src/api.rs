@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::Sub;
 use std::str::FromStr;
 
@@ -46,14 +47,19 @@ pub fn api_balance_history(query: &QString) -> Result<JsonValue> {
         .as_ref()
         .and_then(|symbol| currency_collection.by_symbol(symbol));
 
-    let balance_history = timestamps
+    let timestamp_ids = timestamps
         .iter()
-        .map(|stamp| {
-            schema::balance::table
-                .filter(schema::balance::stamp_id.eq(stamp.stamp_id))
-                .load::<Balance>(&*balance_conn)
-        })
+        .map(|stamp| stamp.stamp_id)
         .collect::<Vec<_>>();
+
+    let balance_history = schema::balance::table
+        .filter(schema::balance::stamp_id.eq_any(timestamp_ids))
+        .load::<Balance>(&*balance_conn)?
+        .into_iter()
+        .group_by(|b| b.stamp_id)
+        .into_iter()
+        .map(|(stamp_id, balances)| (stamp_id, balances.collect_vec()))
+        .collect::<HashMap<_, _>>();
 
     let history = match fiat_currency {
         Some(fiat_currency) => {
@@ -64,9 +70,11 @@ pub fn api_balance_history(query: &QString) -> Result<JsonValue> {
             timestamps
                 .into_par_iter()
                 .zip(exchange_rate_history)
-                .zip(balance_history)
-                .map(|((stamp, exchange_rate), balances)| {
-                    let balances = balances.unwrap_or(vec![]);
+                .map(|(stamp, exchange_rate)| {
+                    let balances = balance_history
+                        .get(&stamp.stamp_id)
+                        .cloned()
+                        .unwrap_or(vec![]);
                     let rates = match exchange_rate {
                         Ok(exchange_rate) => balances
                             .iter()
@@ -82,9 +90,11 @@ pub fn api_balance_history(query: &QString) -> Result<JsonValue> {
         }
         None => timestamps
             .into_par_iter()
-            .zip(balance_history)
-            .map(|(stamp, balances)| {
-                let balances = balances.unwrap_or(vec![]);
+            .map(|stamp| {
+                let balances = balance_history
+                    .get(&stamp.stamp_id)
+                    .cloned()
+                    .unwrap_or(vec![]);
                 let rates = vec![None; balances.len()];
                 (stamp, balances, rates)
             })
