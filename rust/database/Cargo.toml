@@ -13,3 +13,4 @@ chrono = "*"
 diesel = { version = "1", features = ["mysql", "chrono"] }
 diesel-derive-enum = { version = "1", features = ["mysql"] }
 diesel-derive-newtype = "*"
+thiserror = "*"

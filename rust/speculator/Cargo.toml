@@ -13,6 +13,7 @@ apply = "*"
 chrono = "*"
 itertools = "*"
 ordered-float = "*"
+thiserror = "*"
 
 [dev-dependencies]
 assert_approx_eq = "*"

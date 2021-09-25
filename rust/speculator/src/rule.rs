@@ -5,7 +5,7 @@ pub mod rsi_divergence;
 use crate::Duration;
 use anyhow::Error;
 pub use database::model::*;
-use std::fmt::{self, Display, Formatter};
+use thiserror::Error as ThisError;
 
 /// Market state at a time
 #[derive(Debug, Clone)]
@@ -82,19 +82,12 @@ pub trait Rule {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, ThisError)]
 pub enum RuleError {
+    #[error("Market constraint failure")]
     MarketConstraint,
+    #[error("Timestamp constraint failure")]
     StampConstraint,
+    #[error("{0}")]
     Other(Error),
-}
-
-impl Display for RuleError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            RuleError::MarketConstraint => write!(f, "Market constraint failure"),
-            RuleError::StampConstraint => write!(f, "Timestamp constraint failure"),
-            RuleError::Other(e) => e.fmt(f),
-        }
-    }
 }

@@ -1,41 +1,19 @@
-use std::fmt::{self, Display, Formatter};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum LogicError {
+    #[error("DuplicatedCurrency")]
     DuplicatedCurrency,
+    #[error("DuplicatedMarket")]
     DuplicatedMarket,
 }
 
-impl Display for LogicError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for LogicError {}
-
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("DB error: {0}")]
     Db(diesel::result::Error),
+    #[error("Logic error: {0}")]
     Logic(LogicError),
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Db(e) => e.fmt(f),
-            Error::Logic(e) => e.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::Db(e) => Some(e),
-            Error::Logic(e) => Some(e),
-        }
-    }
 }
 
 impl From<diesel::result::Error> for Error {
