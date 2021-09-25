@@ -1,5 +1,5 @@
 use crate::rule::{MarketState, Recommendation, RecommendationType, Rule, RuleError};
-use common::alias::BoxErr;
+use anyhow::{ensure, Result};
 use database::custom_sql_type::{OrderSide, OrderType};
 use database::model::{Amount, Balance, Market};
 use itertools::Itertools;
@@ -54,25 +54,31 @@ impl TradeParameter {
         sell_market_allowable_diff_ratio: f64,
         buy_limit_diff_ratio: f64,
         sell_limit_diff_ratio: f64,
-    ) -> Result<Self, BoxErr> {
-        if !(0.0..=1.0).contains(&buy_trigger) {
-            return Err(BoxErr::from("buy_trigger is out of range"));
-        }
-        if !(0.0..=1.0).contains(&sell_trigger) {
-            return Err(BoxErr::from("sell_trigger is out of range"));
-        }
-        if !(0.0..=1.0).contains(&buy_quantity_ratio) {
-            return Err(BoxErr::from("buy_quantity_ratio is out of range"));
-        }
-        if !(0.0..=1.0).contains(&sell_quantity_ratio) {
-            return Err(BoxErr::from("sell_quantity_ratio is out of range"));
-        }
-        if !(0.0..=1.0).contains(&market_ratio) {
-            return Err(BoxErr::from("market_ratio is out of range"));
-        }
-        if !(0.0..=1.0).contains(&limit_ratio) {
-            return Err(BoxErr::from("limit_ratio is out of range"));
-        }
+    ) -> Result<Self> {
+        ensure!(
+            (0.0..=1.0).contains(&buy_trigger),
+            "buy_trigger is out of range"
+        );
+        ensure!(
+            (0.0..=1.0).contains(&sell_trigger),
+            "sell_trigger is out of range"
+        );
+        ensure!(
+            (0.0..=1.0).contains(&buy_quantity_ratio),
+            "buy_quantity_ratio is out of range"
+        );
+        ensure!(
+            (0.0..=1.0).contains(&sell_quantity_ratio),
+            "sell_quantity_ratio is out of range"
+        );
+        ensure!(
+            (0.0..=1.0).contains(&market_ratio),
+            "market_ratio is out of range"
+        );
+        ensure!(
+            (0.0..=1.0).contains(&limit_ratio),
+            "limit_ratio is out of range"
+        );
 
         let p = Self {
             buy_trigger,

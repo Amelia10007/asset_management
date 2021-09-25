@@ -1,5 +1,4 @@
-use common::alias::Result;
-use common::err::OkOpt;
+use anyhow::{anyhow, Result};
 use json::JsonValue;
 use speculator::trade::TradeParameter;
 use std::fs::File;
@@ -54,6 +53,6 @@ impl TradeSetting {
 fn parse_param_f64(json: &JsonValue, key: &str) -> Result<f64> {
     json[key]
         .as_f64()
-        .ok_opt(format!("Trade json: invalid {}", key))
+        .ok_or(anyhow!("Trade json: invalid {}", key))
         .map_err(Into::into)
 }

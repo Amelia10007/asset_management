@@ -1,6 +1,7 @@
 use super::*;
 use crate::indicator::chart::PriceStamp;
 use crate::indicator::rsi::{Rsi, RsiHistory, RsiStamp};
+use anyhow::{ensure, Result};
 use database::model::*;
 use itertools::Itertools;
 
@@ -22,22 +23,24 @@ impl RsiCrossParameter {
         sell: Rsi,
         upper_pending: Rsi,
         lower_pending: Rsi,
-    ) -> Result<Self, BoxErr> {
-        if candlestick_interval <= Duration::zero() {
-            Err("candlestick_interval must be positive".into())
-        } else if candlestick_required_count <= 0 {
-            Err("candlestick_required_count must be positive".into())
-        } else {
-            let parameter = Self {
-                candlestick_interval,
-                candlestick_required_count,
-                buy,
-                sell,
-                upper_pending,
-                lower_pending,
-            };
-            Ok(parameter)
-        }
+    ) -> Result<Self> {
+        ensure!(
+            candlestick_interval > Duration::zero(),
+            "candlestick_interval must be positive"
+        );
+        ensure!(
+            candlestick_required_count > 0,
+            "candlestick_required_count must be positive"
+        );
+        let parameter = Self {
+            candlestick_interval,
+            candlestick_required_count,
+            buy,
+            sell,
+            upper_pending,
+            lower_pending,
+        };
+        Ok(parameter)
     }
 }
 

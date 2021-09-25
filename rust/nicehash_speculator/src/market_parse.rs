@@ -1,5 +1,4 @@
-use common::alias::Result;
-use common::err::OkOpt;
+use anyhow::{anyhow, Result};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
@@ -19,7 +18,9 @@ impl MarketSetting {
             json::parse(&s)?
         };
 
-        let fee_ratio = json["feeRatio"].as_f64().ok_opt("Market json: invalid feeRatio")?;
+        let fee_ratio = json["feeRatio"]
+            .as_f64()
+            .ok_or(anyhow!("Market json: invalid feeRatio"))?;
         Ok(Self { fee_ratio })
     }
 }

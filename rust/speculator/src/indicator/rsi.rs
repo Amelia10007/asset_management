@@ -1,8 +1,8 @@
 use super::chart::{Candlestick, CandlestickHistory, IndicatorUpdate, PriceStamp};
 use crate::Duration;
 use crate::Timestamp;
+use anyhow::Result;
 use apply::Apply;
-use common::alias::BoxErr;
 use itertools::Itertools;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -123,7 +123,7 @@ impl RsiHistory {
         &self.rsis
     }
 
-    pub fn update(&mut self, price_stamp: PriceStamp) -> Result<(), BoxErr> {
+    pub fn update(&mut self, price_stamp: PriceStamp) -> Result<()> {
         if let IndicatorUpdate::Determined(..) = self.candlestick_history.update(price_stamp)? {
             let rsi = self.calculate_rsi();
             self.rsis.push(rsi);

@@ -1,8 +1,8 @@
 pub mod api_common;
 
+use anyhow::Result;
 use api_common::*;
 use apply::Apply;
-use common::alias::Result;
 use database::model::*;
 use json::JsonValue;
 use std::str::FromStr;

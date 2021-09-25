@@ -1,7 +1,7 @@
 use crate::{Duration, Timestamp};
+use anyhow::{bail, Result};
 use apply::Apply;
 use chrono::DurationRound;
-use common::alias::BoxErr;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PriceStamp {
@@ -116,10 +116,10 @@ impl CandlestickIndicator {
         self.is_candlestick_determined_just_now
     }
 
-    pub fn update(&mut self, price_stamp: PriceStamp) -> Result<IndicatorUpdate, BoxErr> {
+    pub fn update(&mut self, price_stamp: PriceStamp) -> Result<IndicatorUpdate> {
         match self.remaining_price_stamps.last() {
             Some(last) if last.stamp >= price_stamp.stamp => {
-                Err("Timestamp constraint failure".into())
+                bail!("Timestamp constraint failure")
             }
             Some(last) => {
                 let trunc1 = last.stamp().apply(to_utc).duration_trunc(self.interval)?;
@@ -184,7 +184,7 @@ impl CandlestickHistory {
         &self.candlesticks
     }
 
-    pub fn update(&mut self, price_stamp: PriceStamp) -> Result<IndicatorUpdate, BoxErr> {
+    pub fn update(&mut self, price_stamp: PriceStamp) -> Result<IndicatorUpdate> {
         let res = self.indicator.update(price_stamp);
 
         if let Ok(IndicatorUpdate::Determined(stick)) = res {

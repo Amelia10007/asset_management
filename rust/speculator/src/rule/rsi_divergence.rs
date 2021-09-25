@@ -3,6 +3,7 @@ use std::ops::Range;
 use super::*;
 use crate::indicator::chart::PriceStamp;
 use crate::indicator::rsi::{Rsi, RsiHistory};
+use anyhow::{ensure, Result};
 use database::model::*;
 use ordered_float::OrderedFloat;
 
@@ -22,21 +23,20 @@ impl RsiDivergenceParameter {
         candlestick_maxma_interval: Range<usize>,
         upper_divergence_trigger: Rsi,
         lower_divergence_trigger: Rsi,
-    ) -> Result<Self, BoxErr> {
-        if candlestick_interval <= Duration::zero() {
-            Err("candlestick_interval must be positive".into())
-        } else if candlestick_count <= 0 {
-            Err("candlestick_count must be positive".into())
-        } else {
-            let parameter = Self {
-                candlestick_interval,
-                candlestick_count,
-                candlestick_maxma_interval,
-                upper_divergence_trigger,
-                lower_divergence_trigger,
-            };
-            Ok(parameter)
-        }
+    ) -> Result<Self> {
+        ensure!(
+            candlestick_interval > Duration::zero(),
+            "candlestick_interval must be positive"
+        );
+        ensure!(candlestick_count > 0, "candlestick_count must be positive");
+        let parameter = Self {
+            candlestick_interval,
+            candlestick_count,
+            candlestick_maxma_interval,
+            upper_divergence_trigger,
+            lower_divergence_trigger,
+        };
+        Ok(parameter)
     }
 }
 

@@ -7,9 +7,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-common = { path = "../common" }
 database = { path = "../database" }
 apply = "*"
+anyhow = "*"
 dotenv = "*"
 env_logger = "*"
 hyper = { version = "*", features = ["full"] }

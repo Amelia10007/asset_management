@@ -1,6 +1,5 @@
+use anyhow::{Error, Result};
 use apply::Apply;
-use common::alias::BoxErr;
-use common::alias::Result;
 use database::logic::*;
 use database::model::*;
 use diesel::prelude::*;
@@ -215,8 +214,8 @@ fn main() {
     match get_orderbook_target_markets_from_env(&currency_collection, &known_markets) {
         Ok(markets) => {
             match env::var("ORDERBOOK_FETCH_COUNT_PER_MARKET")
-                .map_err(BoxErr::from)
-                .and_then(|s| usize::from_str(&s).map_err(BoxErr::from))
+                .map_err(Error::from)
+                .and_then(|s| usize::from_str(&s).map_err(Error::from))
             {
                 Ok(0) => {}
                 Ok(fetch_count) => {
@@ -255,8 +254,8 @@ fn main() {
     match get_myorder_target_markets_from_env(&currency_collection, &known_markets) {
         Ok(markets) => {
             match env::var("MYORDER_FETCH_COUNT_PER_MARKET")
-                .map_err(BoxErr::from)
-                .and_then(|s| usize::from_str(&s).map_err(BoxErr::from))
+                .map_err(Error::from)
+                .and_then(|s| usize::from_str(&s).map_err(Error::from))
             {
                 Ok(0) => {}
                 Ok(fetch_count) => {

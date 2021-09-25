@@ -1,6 +1,5 @@
+use anyhow::{anyhow, Result};
 use apply::Apply;
-use common::alias::Result;
-use common::err::OkOpt;
 use database::model::NaiveDateTime;
 use json::JsonValue;
 use qstring::QString;
@@ -245,7 +244,9 @@ pub fn fetch_server_time() -> Result<NaiveDateTime> {
         .query_empty()
         .call()?;
 
-    let millis = json["serverTime"].as_u64().ok_opt("Invalid serverTime")?;
+    let millis = json["serverTime"]
+        .as_u64()
+        .ok_or(anyhow!("Invalid serverTime"))?;
     let secs = millis / 1000;
     let nsecs = millis % 1000 * 1_000_000;
     let time = NaiveDateTime::from_timestamp(secs as i64, nsecs as u32);

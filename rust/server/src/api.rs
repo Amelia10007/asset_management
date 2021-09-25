@@ -3,8 +3,8 @@ use std::ops::Sub;
 use std::str::FromStr;
 
 use crate::exchange_graph::ExchangeGraph;
+use anyhow::Result;
 use apply::Apply;
-use common::alias::Result;
 use database::custom_sql_type::NaiveDateTime;
 use database::diesel::QueryDsl;
 use database::diesel::*;

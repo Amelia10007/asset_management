@@ -2,10 +2,8 @@ mod market_parse;
 mod rule_parse;
 mod trade_parse;
 
+use anyhow::{anyhow, Result};
 use apply::Apply;
-use common::alias::BoxErr;
-use common::alias::Result;
-use common::err::OkOpt;
 use database::logic::*;
 use database::model::*;
 use database::schema;
@@ -158,14 +156,14 @@ fn load_latest_sim_balances(
     let latest_balance_stamp_id = schema::balance::table
         .select(max(schema::balance::stamp_id))
         .first::<Option<StampId>>(balance_sim_conn)?
-        .ok_opt("No balance exists in simulation DB")?;
+        .ok_or(anyhow!("No balance exists in simulation DB"))?;
     currency_collection
         .currencies()
         .into_iter()
         .filter_map(|c| {
             let latest_balance = schema::balance::table
                 .filter(schema::balance::currency_id.eq(c.currency_id))
-                .order_by(schema::balance::stamp_id.desc())
+                .filter(schema::balance::stamp_id.eq(latest_balance_stamp_id))
                 .first(balance_sim_conn)
                 .optional();
             match latest_balance {
@@ -360,7 +358,7 @@ fn batch() -> Result<()> {
 
     match last_sim_stamp_id {
         Some(id) if id == latest_main_stamp.stamp_id => {
-            Err(BoxErr::from("No new timestamp exists in main DB"))
+            Err(anyhow!("No new timestamp exists in main DB"))
         }
         Some(_) => simulate_trade(&conn, &balance_sim_conn, latest_main_stamp),
         None => sync_balance(&conn, &balance_sim_conn, latest_main_stamp),

@@ -1,5 +1,5 @@
+use anyhow::{anyhow, ensure, Error, Result};
 use apply::Apply;
-use common::alias::{BoxErr, Result};
 use hyper::server::Server;
 use hyper::service::*;
 use hyper::{Body, Request, Response, Uri};
@@ -34,9 +34,7 @@ fn render_file(path: &str) -> Result<Vec<u8>> {
     let is_safe_path = path
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-');
-    if !is_safe_path {
-        return Err(format!("Invalid file path: {}", path).into());
-    }
+    ensure!(is_safe_path, "Invalid file path: {}", path);
 
     let path = env::var("WEBCONTENT_ROOT")?
         .deref()
@@ -55,7 +53,7 @@ fn render_file(path: &str) -> Result<Vec<u8>> {
 fn render_api(api_path: &str, query: &QString) -> Result<JsonValue> {
     match api_path {
         "balance_history" => api::api_balance_history(query),
-        other => Err(format!("Invalid api: {}", other).into()),
+        other => Err(anyhow!("Invalid api: {}", other)),
     }
 }
 
@@ -78,8 +76,8 @@ async fn main() {
     env_logger::try_init().ok();
 
     let addr = match env::var("SERVER_ADDRESS")
-        .map_err(BoxErr::from)
-        .and_then(|addr| SocketAddr::from_str(&addr).map_err(BoxErr::from))
+        .map_err(Error::from)
+        .and_then(|addr| SocketAddr::from_str(&addr).map_err(Error::from))
     {
         Ok(addr) => addr,
         Err(e) => {
@@ -88,7 +86,8 @@ async fn main() {
         }
     };
 
-    let make_service = make_service_fn(|_conn| async { Result::Ok(service_fn(handle)) });
+    let make_service =
+        make_service_fn(|_conn| async { Result::<_, Error>::Ok(service_fn(handle)) });
 
     let server = Server::bind(&addr).serve(make_service);
 

@@ -3,7 +3,7 @@ pub mod rsi_cross;
 pub mod rsi_divergence;
 
 use crate::Duration;
-use common::alias::BoxErr;
+use anyhow::Error;
 pub use database::model::*;
 use std::fmt::{self, Display, Formatter};
 
@@ -86,7 +86,7 @@ pub trait Rule {
 pub enum RuleError {
     MarketConstraint,
     StampConstraint,
-    Other(BoxErr),
+    Other(Error),
 }
 
 impl Display for RuleError {

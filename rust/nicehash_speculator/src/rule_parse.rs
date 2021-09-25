@@ -1,6 +1,5 @@
+use anyhow::{anyhow, bail, Result};
 use apply::Apply;
-use common::alias::Result;
-use common::err::OkOpt;
 use database::custom_sql_type::{MarketId, OrderSide};
 use database::logic::{CurrencyCollection, MarketCollection};
 use database::model::Market;
@@ -50,8 +49,8 @@ impl RuleSetting {
                 Some("rsiDivergence") => {
                     parse_rsi_divergence_rule(rule_json, currency_collection, market_collection)
                 }
-                Some(s) => Err(format!("Unknown algorithm: {}", s).into()),
-                None => Err("Unspecified algorithm".into()),
+                Some(s) => Err(anyhow!("Unknown algorithm: {}", s)),
+                None => Err(anyhow!("Unspecified algorithm")),
             };
 
             match parsed_rules {
@@ -83,30 +82,30 @@ fn parse_rsi_cross_rule(
     currency_collection: &CurrencyCollection,
     market_collection: &MarketCollection,
 ) -> Result<Vec<WeightedRule>> {
-    let weight = json["weight"].as_f64().ok_opt("weight undefined")?;
+    let weight = json["weight"].as_f64().ok_or(anyhow!("weight undefined"))?;
     let parameter = {
         let candlestick_timespan = json["candlestickTimespanMin"]
             .as_i64()
-            .ok_opt("Invalid candlestickTimespanMin")?
+            .ok_or(anyhow!("Invalid candlestickTimespanMin"))?
             .apply(Duration::minutes);
         let candlestick_required_count = json["candlestickCount"]
             .as_usize()
-            .ok_opt("Invalid candlestickCount")?;
+            .ok_or(anyhow!("Invalid candlestickCount"))?;
         let buy_trigger = json["buyTrigger"]
             .as_f64()
-            .ok_opt("Invalid buyTrigger")?
+            .ok_or(anyhow!("Invalid buyTrigger"))?
             .apply(Rsi::from_percent);
         let sell_trigger = json["sellTrigger"]
             .as_f64()
-            .ok_opt("Invalid sellTrigger")?
+            .ok_or(anyhow!("Invalid sellTrigger"))?
             .apply(Rsi::from_percent);
         let upper_pending_trigger = json["upperPendingTrigger"]
             .as_f64()
-            .ok_opt("Invalid upperPendingTrigger")?
+            .ok_or(anyhow!("Invalid upperPendingTrigger"))?
             .apply(Rsi::from_percent);
         let lower_pending_trigger = json["lowerPendingTrigger"]
             .as_f64()
-            .ok_opt("Invalid lowerPendingTrigger")?
+            .ok_or(anyhow!("Invalid lowerPendingTrigger"))?
             .apply(Rsi::from_percent);
         RsiCrossParameter::new(
             candlestick_timespan,
@@ -134,28 +133,28 @@ fn parse_rsi_divergence_rule(
     currency_collection: &CurrencyCollection,
     market_collection: &MarketCollection,
 ) -> Result<Vec<WeightedRule>> {
-    let weight = json["weight"].as_f64().ok_opt("weight undefined")?;
+    let weight = json["weight"].as_f64().ok_or(anyhow!("weight undefined"))?;
     let parameter = {
         let candlestick_timespan = json["candlestickTimespanMin"]
             .as_i64()
-            .ok_opt("Invalid candlestickTimespanMin")?
+            .ok_or(anyhow!("Invalid candlestickTimespanMin"))?
             .apply(Duration::minutes);
         let candlestick_count = json["candlestickCount"]
             .as_usize()
-            .ok_opt("Invalid candlestickCount")?;
+            .ok_or(anyhow!("Invalid candlestickCount"))?;
         let candlestick_maxima_interval_min = json["candleStickMaximaIntervalMin"]
             .as_usize()
-            .ok_opt("Invalid candleStickMaximaIntervalMin")?;
+            .ok_or(anyhow!("Invalid candleStickMaximaIntervalMin"))?;
         let candlestick_maxima_interval_max = json["candleStickMaximaIntervalMax"]
             .as_usize()
-            .ok_opt("Invalid candleStickMaximaIntervalMax")?;
+            .ok_or(anyhow!("Invalid candleStickMaximaIntervalMax"))?;
         let upper_divergence_trigger = json["upperDivergenceTrigger"]
             .as_f64()
-            .ok_opt("Invalid upperDivergenceTrigger")?
+            .ok_or(anyhow!("Invalid upperDivergenceTrigger"))?
             .apply(Rsi::from_percent);
         let lower_divergence_trigger = json["lowerDivergenceTrigger"]
             .as_f64()
-            .ok_opt("Invalid lowerDivergenceTrigger")?
+            .ok_or(anyhow!("Invalid lowerDivergenceTrigger"))?
             .apply(Rsi::from_percent);
 
         let range = candlestick_maxima_interval_min..candlestick_maxima_interval_max;
@@ -184,12 +183,12 @@ fn parse_fixed_rule(
     currency_collection: &CurrencyCollection,
     market_collection: &MarketCollection,
 ) -> Result<Vec<WeightedRule>> {
-    let weight = json["weight"].as_f64().ok_opt("weight undefined")?;
+    let weight = json["weight"].as_f64().ok_or(anyhow!("weight undefined"))?;
     let side = match json["side"].as_str() {
         Some("buy") => OrderSide::Buy,
         Some("sell") => OrderSide::Sell,
-        Some(s) => return Err(format!("Undefined order side: {}", s).into()),
-        None => return Err("side undefined".into()),
+        Some(s) => bail!("Undefined order side: {}", s),
+        None => bail!("side undefined"),
     };
 
     parse_markets(&json["pairs"], currency_collection, market_collection)
