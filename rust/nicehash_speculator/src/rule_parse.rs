@@ -6,7 +6,6 @@ use database::model::Market;
 use itertools::Itertools;
 use json::JsonValue;
 use option_inspect::OptionInspectNone;
-use speculator::indicator::rsi::Rsi;
 use speculator::rule::fixed::FixedRule;
 use speculator::rule::rsi_cross::*;
 use speculator::rule::rsi_divergence::*;
@@ -93,20 +92,16 @@ fn parse_rsi_cross_rule(
             .ok_or(anyhow!("Invalid candlestickCount"))?;
         let buy_trigger = json["buyTrigger"]
             .as_f64()
-            .ok_or(anyhow!("Invalid buyTrigger"))?
-            .apply(Rsi::from_percent);
+            .ok_or(anyhow!("Invalid buyTrigger"))?;
         let sell_trigger = json["sellTrigger"]
             .as_f64()
-            .ok_or(anyhow!("Invalid sellTrigger"))?
-            .apply(Rsi::from_percent);
+            .ok_or(anyhow!("Invalid sellTrigger"))?;
         let upper_pending_trigger = json["upperPendingTrigger"]
             .as_f64()
-            .ok_or(anyhow!("Invalid upperPendingTrigger"))?
-            .apply(Rsi::from_percent);
+            .ok_or(anyhow!("Invalid upperPendingTrigger"))?;
         let lower_pending_trigger = json["lowerPendingTrigger"]
             .as_f64()
-            .ok_or(anyhow!("Invalid lowerPendingTrigger"))?
-            .apply(Rsi::from_percent);
+            .ok_or(anyhow!("Invalid lowerPendingTrigger"))?;
         RsiCrossParameter::new(
             candlestick_timespan,
             candlestick_required_count,
@@ -150,12 +145,10 @@ fn parse_rsi_divergence_rule(
             .ok_or(anyhow!("Invalid candleStickMaximaIntervalMax"))?;
         let upper_divergence_trigger = json["upperDivergenceTrigger"]
             .as_f64()
-            .ok_or(anyhow!("Invalid upperDivergenceTrigger"))?
-            .apply(Rsi::from_percent);
+            .ok_or(anyhow!("Invalid upperDivergenceTrigger"))?;
         let lower_divergence_trigger = json["lowerDivergenceTrigger"]
             .as_f64()
-            .ok_or(anyhow!("Invalid lowerDivergenceTrigger"))?
-            .apply(Rsi::from_percent);
+            .ok_or(anyhow!("Invalid lowerDivergenceTrigger"))?;
 
         let range = candlestick_maxima_interval_min..candlestick_maxima_interval_max;
         RsiDivergenceParameter::new(

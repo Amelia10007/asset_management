@@ -12,7 +12,7 @@ anyhow = "*"
 apply = "*"
 chrono = "*"
 itertools = "*"
-ordered-float = "*"
+ta = "*"
 thiserror = "*"
 
 [dev-dependencies]
