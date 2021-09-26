@@ -1,8 +1,12 @@
-use crate::rule::{MarketState, Recommendation, RecommendationType, Rule, RuleError};
-use anyhow::{ensure, Result};
-use database::custom_sql_type::{OrderSide, OrderType};
+use crate::rule::*;
+use anyhow::{bail, Result};
+use chrono::Duration;
+use database::custom_sql_type::{MarketId, OrderSide, OrderType};
 use database::model::{Amount, Balance, Market};
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use validator::Validate;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrderRecommendation {
@@ -15,19 +19,26 @@ pub struct OrderRecommendation {
     pub price: Amount,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
 pub struct TradeParameter {
     /// Buy order if weighted average of rules is above this
+    #[validate(range(min = 0, max = 1.0))]
     buy_trigger: f64,
     /// Sell order if (negative) weighted average of rules is above this
+    #[validate(range(min = 0, max = 1.0))]
     sell_trigger: f64,
     /// Correction coefficient of buy quantity
+    #[validate(range(min = 0, max = 1.0))]
     buy_quantity_ratio: f64,
     /// Correction coefficient of sell quantity
+    #[validate(range(min = 0, max = 1.0))]
     sell_quantity_ratio: f64,
     /// Ratio of market order quantity by whole quantity
+    #[validate(range(min = 0, max = 1.0))]
     market_ratio: f64,
     /// Ratio of limit order quantity by whole quantity
+    #[validate(range(min = 0, max = 1.0))]
     limit_ratio: f64,
     buy_market_allowable_diff_ratio: f64,
     sell_market_allowable_diff_ratio: f64,
@@ -36,94 +47,78 @@ pub struct TradeParameter {
 }
 
 impl TradeParameter {
-    /// # Params
-    /// 1. `buy_trigger` Buy order if weighted average of rules is above this
-    /// 1. `sell_trigger` Sell order if (negative) weighted average of rules is above this
-    /// 1. `buy_quantity_ratio` Correction coefficient of buy quantity
-    /// 1. `sell_quantity_ratio` Correction coefficient of sell quantity
-    /// 1. `market_ratio` Ratio of market order quantity by whole quantity
-    /// 1. `limit_ratio` Ratio of limit order quantity by whole quantity
-    pub fn new(
-        buy_trigger: f64,
-        sell_trigger: f64,
-        buy_quantity_ratio: f64,
-        sell_quantity_ratio: f64,
-        market_ratio: f64,
-        limit_ratio: f64,
-        buy_market_allowable_diff_ratio: f64,
-        sell_market_allowable_diff_ratio: f64,
-        buy_limit_diff_ratio: f64,
-        sell_limit_diff_ratio: f64,
-    ) -> Result<Self> {
-        ensure!(
-            (0.0..=1.0).contains(&buy_trigger),
-            "buy_trigger is out of range"
-        );
-        ensure!(
-            (0.0..=1.0).contains(&sell_trigger),
-            "sell_trigger is out of range"
-        );
-        ensure!(
-            (0.0..=1.0).contains(&buy_quantity_ratio),
-            "buy_quantity_ratio is out of range"
-        );
-        ensure!(
-            (0.0..=1.0).contains(&sell_quantity_ratio),
-            "sell_quantity_ratio is out of range"
-        );
-        ensure!(
-            (0.0..=1.0).contains(&market_ratio),
-            "market_ratio is out of range"
-        );
-        ensure!(
-            (0.0..=1.0).contains(&limit_ratio),
-            "limit_ratio is out of range"
-        );
-
-        let p = Self {
-            buy_trigger,
-            sell_trigger,
-            buy_quantity_ratio,
-            sell_quantity_ratio,
-            market_ratio,
-            limit_ratio,
-            buy_market_allowable_diff_ratio,
-            sell_market_allowable_diff_ratio,
-            buy_limit_diff_ratio,
-            sell_limit_diff_ratio,
-        };
-
-        Ok(p)
-    }
-
     fn market_limit_ratio(&self) -> (f64, f64) {
         let sum = self.market_ratio + self.limit_ratio;
         (self.market_ratio / sum, self.limit_ratio / sum)
     }
 }
 
-pub struct WeightedRule {
+struct WeightedRule {
     rule: Box<dyn Rule>,
     weight: f64,
 }
 
-impl WeightedRule {
-    /// # Returns
-    /// Returns `Some(rule)` if `weight` is not negative, otherwise `None`
-    pub fn new<R: Rule + 'static>(rule: R, weight: f64) -> Option<Self> {
-        if weight >= 0.0 {
-            let weighted_rule = WeightedRule {
-                rule: Box::from(rule),
-                weight,
-            };
-            Some(weighted_rule)
-        } else {
-            None
-        }
-    }
+#[derive(Serialize, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+struct RuleComponent {
+    rule: Box<dyn RuleParameter>,
+    #[validate(range(min = 0))]
+    weight: f64,
+    #[serde(default)]
+    markets: Vec<String>,
+}
 
-    pub fn rule(&self) -> &Box<dyn Rule> {
-        &self.rule
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeAggregationParameter {
+    rules: Vec<RuleComponent>,
+    #[serde(default)]
+    default_markets: Vec<String>,
+}
+
+impl TradeAggregationParameter {
+    pub fn finalize<F>(
+        self,
+        trade_parameter: TradeParameter,
+        mut f: F,
+    ) -> Result<HashMap<MarketId, TradeAggregation>>
+    where
+        F: FnMut(&str) -> Option<Market>,
+    {
+        let mut market_map = HashMap::new();
+        let mut map = HashMap::new();
+
+        for rule_component in self.rules.into_iter() {
+            let market_strs = if rule_component.markets.is_empty() {
+                &self.default_markets
+            } else {
+                &rule_component.markets
+            };
+            for market_str in market_strs.iter() {
+                let market = match f(&market_str) {
+                    Some(market) => market,
+                    None => bail!("{} is invalid market", market_str),
+                };
+                market_map.entry(market.market_id).or_insert(market.clone());
+
+                let rule = rule_component.rule.create_rule(market.clone());
+                let weight = rule_component.weight;
+                let weighted_rule = WeightedRule { rule, weight };
+                map.entry(market.market_id)
+                    .or_insert(vec![])
+                    .push(weighted_rule);
+            }
+        }
+
+        let mut aggregation_map = HashMap::new();
+        for (market_id, weighted_rules) in map.into_iter() {
+            let market = market_map[&market_id].clone();
+            let aggregation = TradeAggregation::new(market, trade_parameter, weighted_rules);
+            let ret = aggregation_map.insert(market_id, aggregation);
+            assert!(ret.is_none());
+        }
+
+        Ok(aggregation_map)
     }
 }
 
@@ -135,11 +130,7 @@ pub struct TradeAggregation {
 }
 
 impl TradeAggregation {
-    pub fn new(
-        market: Market,
-        parameter: TradeParameter,
-        weighted_rules: Vec<WeightedRule>,
-    ) -> Self {
+    fn new(market: Market, parameter: TradeParameter, weighted_rules: Vec<WeightedRule>) -> Self {
         Self {
             market,
             parameter,
@@ -152,8 +143,11 @@ impl TradeAggregation {
         &self.market
     }
 
-    pub fn weighted_rules(&self) -> &[WeightedRule] {
-        &self.weighted_rules
+    pub fn duration_requirement(&self) -> Option<Duration> {
+        self.weighted_rules
+            .iter()
+            .flat_map(|weighted_rule| weighted_rule.rule.duration_requirement())
+            .max()
     }
 
     pub fn update_market_state(&mut self, market_state: MarketState) -> Result<(), Vec<RuleError>> {

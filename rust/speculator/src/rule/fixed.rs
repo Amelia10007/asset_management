@@ -1,14 +1,29 @@
-use super::{Duration, Market, MarketState, Recommendation, RecommendationType, Rule, RuleError};
+use super::*;
 use database::custom_sql_type::OrderSide;
+use serde::{Deserialize, Serialize};
+use validator::Validate;
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct FixedParameterSerde {
+    side: OrderSide,
+}
+
+#[typetag::serde(name = "fixed")]
+impl RuleParameter for FixedParameterSerde {
+    fn create_rule(&self, market: Market) -> Box<dyn Rule> {
+        Box::from(FixedRule::new(market, self.side))
+    }
+}
 
 #[derive(Debug, Clone)]
-pub struct FixedRule {
+struct FixedRule {
     market: Market,
     side: OrderSide,
 }
 
 impl FixedRule {
-    pub fn new(market: Market, side: OrderSide) -> Self {
+    fn new(market: Market, side: OrderSide) -> Self {
         Self { market, side }
     }
 }

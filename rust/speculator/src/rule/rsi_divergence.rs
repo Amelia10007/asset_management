@@ -1,46 +1,51 @@
 use super::*;
 use crate::indicator::*;
-use anyhow::{ensure, Result};
+use anyhow::Result;
 use database::model::*;
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use std::ops::Range;
 use ta::{indicators::RelativeStrengthIndex, Close, Period};
+use validator::{Validate, ValidationError};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
 pub struct RsiDivergenceParameter {
-    pub candlestick_interval: Duration,
-    pub candlestick_count: usize,
-    pub candlestick_maxma_interval: Range<usize>,
-    pub upper_divergence_trigger: f64,
-    pub lower_divergence_trigger: f64,
+    #[validate(range(min = 1))]
+    candlestick_interval_min: i64,
+    #[validate(range(min = 1))]
+    candlestick_count: usize,
+    #[validate(custom = "validate_range")]
+    candlestick_maxima_interval: Range<usize>,
+    #[validate(range(min = 0, max = 100))]
+    upper_divergence_trigger: f64,
+    #[validate(range(min = 0, max = 100))]
+    lower_divergence_trigger: f64,
 }
 
 impl RsiDivergenceParameter {
-    pub fn new(
-        candlestick_interval: Duration,
-        candlestick_count: usize,
-        candlestick_maxma_interval: Range<usize>,
-        upper_divergence_trigger: f64,
-        lower_divergence_trigger: f64,
-    ) -> Result<Self> {
-        ensure!(
-            candlestick_interval > Duration::zero(),
-            "candlestick_interval must be positive"
-        );
-        ensure!(candlestick_count > 0, "candlestick_count must be positive");
-        let parameter = Self {
-            candlestick_interval,
-            candlestick_count,
-            candlestick_maxma_interval,
-            upper_divergence_trigger,
-            lower_divergence_trigger,
-        };
-        Ok(parameter)
+    fn candlestick_interval(&self) -> Duration {
+        Duration::minutes(self.candlestick_interval_min)
+    }
+}
+
+#[typetag::serde(name = "rsiDivergence")]
+impl RuleParameter for RsiDivergenceParameter {
+    fn create_rule(&self, market: Market) -> Box<dyn Rule> {
+        Box::from(RsiDivergenceRule::new(market, self.clone()))
+    }
+}
+
+fn validate_range(range: &Range<usize>) -> Result<(), ValidationError> {
+    if range.start > 0 && range.start < range.end {
+        Ok(())
+    } else {
+        Err(ValidationError::new("Invalid range"))
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct RsiDivergenceRule {
+struct RsiDivergenceRule {
     market: Market,
     parameter: RsiDivergenceParameter,
     market_states: Vec<MarketState>,
@@ -48,11 +53,11 @@ pub struct RsiDivergenceRule {
 }
 
 impl RsiDivergenceRule {
-    pub fn new(market: Market, parameter: RsiDivergenceParameter) -> Self {
+    fn new(market: Market, parameter: RsiDivergenceParameter) -> Self {
         // Parameter holds RsiHistory's constraint by RsiDivergenceParameter::new(),
         // so no panic occurs
         let indicator = RelativeStrengthIndex::new(parameter.candlestick_count).unwrap();
-        let indicator_buffer = IndicatorBuffer::new(indicator, parameter.candlestick_interval);
+        let indicator_buffer = IndicatorBuffer::new(indicator, parameter.candlestick_interval());
         let rsi_history = IndicatorHistory::new(indicator_buffer);
         Self {
             market,
@@ -124,14 +129,14 @@ impl Rule for RsiDivergenceRule {
                 return Box::from(Neutral(self.parameter.clone()));
             }
 
-            let take_count = self.parameter.candlestick_maxma_interval.end
-                - self.parameter.candlestick_maxma_interval.start;
+            let take_count = self.parameter.candlestick_maxima_interval.end
+                - self.parameter.candlestick_maxima_interval.start;
 
             // Take determined candlesticks and its RSI
             history
                 .iter()
                 .flat_map(std::convert::identity)
-                .skip(self.parameter.candlestick_maxma_interval.start)
+                .skip(self.parameter.candlestick_maxima_interval.start)
                 .take(take_count)
                 .cloned()
         };
@@ -216,7 +221,7 @@ impl Recommendation for RsiDivergenceRecommendation {
         };
         let mut header = format!(
             "Rsi divergence({}m {}x): ",
-            parameter.candlestick_interval.num_minutes(),
+            parameter.candlestick_interval().num_minutes(),
             parameter.candlestick_count
         );
 

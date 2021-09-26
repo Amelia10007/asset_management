@@ -54,6 +54,11 @@ pub trait Recommendation {
     fn reason(&self) -> String;
 }
 
+#[typetag::serde(tag = "algorithm")]
+pub trait RuleParameter {
+    fn create_rule(&self, market: Market) -> Box<dyn Rule>;
+}
+
 /// Speculator rule
 pub trait Rule {
     /// Return target-market of this rule

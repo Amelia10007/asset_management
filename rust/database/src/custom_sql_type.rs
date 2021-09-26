@@ -1,5 +1,6 @@
 pub use chrono::NaiveDateTime;
 use diesel_derive_enum::DbEnum;
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 macro_rules! id_type {
@@ -33,7 +34,7 @@ id_type!(PriceId, i32);
 id_type!(OrderbookId, i32);
 id_type!(MyorderId, i32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, DbEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, DbEnum, Serialize, Deserialize)]
 pub enum OrderSide {
     Buy,
     Sell,

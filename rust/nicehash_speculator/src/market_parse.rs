@@ -1,26 +1,8 @@
-use anyhow::{anyhow, Result};
-use std::fs::File;
-use std::io::{BufReader, Read};
-use std::path::Path;
+use serde::Deserialize;
+use validator::Validate;
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
 pub struct MarketSetting {
     pub fee_ratio: f64,
-}
-
-impl MarketSetting {
-    pub fn from_json(path: impl AsRef<Path>) -> Result<Self> {
-        let json = {
-            let file = File::open(path)?;
-            let mut reader = BufReader::new(file);
-            let mut s = String::new();
-            reader.read_to_string(&mut s)?;
-            json::parse(&s)?
-        };
-
-        let fee_ratio = json["feeRatio"]
-            .as_f64()
-            .ok_or(anyhow!("Market json: invalid feeRatio"))?;
-        Ok(Self { fee_ratio })
-    }
 }

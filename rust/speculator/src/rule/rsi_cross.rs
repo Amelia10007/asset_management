@@ -1,51 +1,44 @@
 use super::*;
 use crate::indicator::*;
-use anyhow::{ensure, Result};
+use anyhow::Result;
 use database::model::*;
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use ta::{indicators::RelativeStrengthIndex, Period};
+use validator::Validate;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
 pub struct RsiCrossParameter {
-    candlestick_interval: Duration,
-    candlestick_required_count: usize,
-    buy: f64,
-    sell: f64,
-    upper_pending: f64,
-    lower_pending: f64,
+    #[validate(range(min = 1))]
+    candlestick_interval_min: i64,
+    #[validate(range(min = 1))]
+    candlestick_count: usize,
+    #[validate(range(min = 0, max = 100))]
+    buy_trigger: f64,
+    #[validate(range(min = 0, max = 100))]
+    sell_trigger: f64,
+    #[validate(range(min = 0, max = 100))]
+    upper_pending_trigger: f64,
+    #[validate(range(min = 0, max = 100))]
+    lower_pending_trigger: f64,
 }
 
 impl RsiCrossParameter {
-    pub fn new(
-        candlestick_interval: Duration,
-        candlestick_required_count: usize,
-        buy: f64,
-        sell: f64,
-        upper_pending: f64,
-        lower_pending: f64,
-    ) -> Result<Self> {
-        ensure!(
-            candlestick_interval > Duration::zero(),
-            "candlestick_interval must be positive"
-        );
-        ensure!(
-            candlestick_required_count > 0,
-            "candlestick_required_count must be positive"
-        );
-        let parameter = Self {
-            candlestick_interval,
-            candlestick_required_count,
-            buy,
-            sell,
-            upper_pending,
-            lower_pending,
-        };
-        Ok(parameter)
+    fn candlestick_interval(&self) -> Duration {
+        Duration::minutes(self.candlestick_interval_min)
+    }
+}
+
+#[typetag::serde(name = "rsiCross")]
+impl RuleParameter for RsiCrossParameter {
+    fn create_rule(&self, market: Market) -> Box<dyn Rule> {
+        Box::from(RsiCrossRule::new(market, *self))
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct RsiCrossRule {
+struct RsiCrossRule {
     market: Market,
     parameter: RsiCrossParameter,
     market_states: Vec<MarketState>,
@@ -53,11 +46,11 @@ pub struct RsiCrossRule {
 }
 
 impl RsiCrossRule {
-    pub fn new(market: Market, parameter: RsiCrossParameter) -> Self {
+    fn new(market: Market, parameter: RsiCrossParameter) -> Self {
         // Parameter holds RsiHistory's constraint by RsiCrossParameter::new(),
         // so no panic occurs
-        let indicator = RelativeStrengthIndex::new(parameter.candlestick_required_count).unwrap();
-        let indicator_buffer = IndicatorBuffer::new(indicator, parameter.candlestick_interval);
+        let indicator = RelativeStrengthIndex::new(parameter.candlestick_count).unwrap();
+        let indicator_buffer = IndicatorBuffer::new(indicator, parameter.candlestick_interval());
         let rsi_history = IndicatorHistory::new(indicator_buffer);
 
         Self {
@@ -137,16 +130,16 @@ impl Rule for RsiCrossRule {
         };
 
         let recommendation = match (prev, current) {
-            (_, current) if current > p.upper_pending => {
+            (_, current) if current > p.upper_pending_trigger => {
                 RsiCrossRecommendation::Pending(current, p)
             }
-            (_, current) if current < p.lower_pending => {
+            (_, current) if current < p.lower_pending_trigger => {
                 RsiCrossRecommendation::Pending(current, p)
             }
-            (prev, current) if prev < p.buy && current >= p.buy => {
+            (prev, current) if prev < p.buy_trigger && current >= p.buy_trigger => {
                 RsiCrossRecommendation::Buy(prev, current, p)
             }
-            (prev, current) if prev > p.sell && current <= p.sell => {
+            (prev, current) if prev > p.sell_trigger && current <= p.sell_trigger => {
                 RsiCrossRecommendation::Sell(prev, current, p)
             }
             _ => RsiCrossRecommendation::Neutral(p),
@@ -185,8 +178,8 @@ impl Recommendation for RsiCrossRecommendation {
         };
         let mut header = format!(
             "Rsi({}m {}x): ",
-            parameter.candlestick_interval.num_minutes(),
-            parameter.candlestick_required_count
+            parameter.candlestick_interval().num_minutes(),
+            parameter.candlestick_count
         );
 
         let description = match self {

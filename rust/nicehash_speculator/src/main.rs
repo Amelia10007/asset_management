@@ -1,6 +1,4 @@
 mod market_parse;
-mod rule_parse;
-mod trade_parse;
 
 use anyhow::{anyhow, Result};
 use apply::Apply;
@@ -10,9 +8,11 @@ use database::schema;
 use diesel::dsl::max;
 use diesel::insert_into;
 use diesel::prelude::*;
+use itertools::Itertools;
+use market_parse::MarketSetting;
 use speculator::rule::MarketState;
 use speculator::rule::RecommendationType;
-use speculator::trade::TradeAggregation;
+use speculator::trade::{TradeAggregation, TradeAggregationParameter, TradeParameter};
 use std::collections::HashMap;
 use std::env;
 use std::hash::Hash;
@@ -62,23 +62,27 @@ fn get_latest_stamp(conn: &Conn) -> Result<Stamp> {
         .map_err(Into::into)
 }
 
-pub fn construct_speculators(
+fn construct_speculators(
     currency_collection: &CurrencyCollection,
     market_collection: &MarketCollection,
 ) -> Result<HashMap<MarketId, TradeAggregation>> {
-    let rule_setting = env::var("RULE_JSON")?.apply(|path| {
-        rule_parse::RuleSetting::from_json(path, currency_collection, market_collection)
-    })?;
-    let trade_setting = env::var("TRADE_JSON")?.apply(trade_parse::TradeSetting::from_json)?;
+    let rule_parameter: TradeAggregationParameter = env::var("RULE_JSON")?
+        .apply(std::fs::File::open)?
+        .apply(serde_json::from_reader)?;
+    let trade_parameter: TradeParameter = env::var("TRADE_JSON")?
+        .apply(std::fs::File::open)?
+        .apply(serde_json::from_reader)?;
 
-    rule_setting
-        .into_rules_per_market()
-        .map(|(market, weighted_rules)| {
-            TradeAggregation::new(market, trade_setting.trade_parameter, weighted_rules)
-        })
-        .map(|aggregation| (aggregation.market().market_id, aggregation))
-        .collect::<HashMap<_, _>>()
-        .apply(Ok)
+    let xxx = |str: &str| {
+        let (base_symbol, quote_symbol) = str.split('-').collect_tuple::<(_, _)>()?;
+        let base = currency_collection.by_symbol(base_symbol)?;
+        let quote = currency_collection.by_symbol(quote_symbol)?;
+        market_collection
+            .by_base_quote_id(base.currency_id, quote.currency_id)
+            .cloned()
+    };
+
+    rule_parameter.finalize(trade_parameter, xxx)
 }
 
 pub fn load_market_states(
@@ -88,8 +92,7 @@ pub fn load_market_states(
 ) -> Result<()> {
     let required_duration = match aggregations
         .values()
-        .flat_map(|a| a.weighted_rules())
-        .flat_map(|weighted_rule| weighted_rule.rule().duration_requirement())
+        .flat_map(|a| a.duration_requirement())
         .max()
     {
         Some(d) => d,
@@ -206,7 +209,9 @@ fn simulate_trade(conn: &Conn, balance_sim_conn: &Conn, latest_main_stamp: Stamp
     let mut speculators = construct_speculators(&currency_collection, &market_collection)?;
     load_market_states(conn, latest_main_stamp.clone(), &mut speculators)?;
 
-    let market_setting = env::var("MARKET_JSON")?.apply(market_parse::MarketSetting::from_json)?;
+    let market_setting: MarketSetting = env::var("MARKET_JSON")?
+        .apply(std::fs::File::open)?
+        .apply(serde_json::from_reader)?;
     let fee_ratio = market_setting.fee_ratio;
 
     let mut current_balances = load_latest_sim_balances(&balance_sim_conn, &currency_collection)?;

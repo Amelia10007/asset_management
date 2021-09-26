@@ -12,8 +12,11 @@ anyhow = "*"
 apply = "*"
 chrono = "*"
 itertools = "*"
+serde = { version = "*", features = ["derive"] }
 ta = "*"
 thiserror = "*"
+typetag = "*"
+validator = { version = "*", features = ["derive"] }
 
 [dev-dependencies]
 assert_approx_eq = "*"
