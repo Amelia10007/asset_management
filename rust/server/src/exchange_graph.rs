@@ -19,14 +19,8 @@ impl<T> ExchangeGraph<T> {
             rate_map.insert((base, quote), rate);
             rate_map.insert((quote, base), 1.0 / rate);
 
-            direct_relations
-                .entry(base)
-                .and_modify(|v: &mut Vec<_>| v.push(quote))
-                .or_insert(vec![quote]);
-            direct_relations
-                .entry(quote)
-                .and_modify(|v| v.push(base))
-                .or_insert(vec![base]);
+            direct_relations.entry(base).or_insert(vec![]).push(quote);
+            direct_relations.entry(quote).or_insert(vec![]).push(base);
         }
 
         Self {
