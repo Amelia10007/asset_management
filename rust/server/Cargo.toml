@@ -10,6 +10,7 @@ edition = "2018"
 database = { path = "../database" }
 apply = "*"
 anyhow = "*"
+chrono = "*"
 dotenv = "*"
 env_logger = "*"
 hyper = { version = "*", features = ["full"] }

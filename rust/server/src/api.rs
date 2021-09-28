@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-use std::ops::Sub;
 use std::str::FromStr;
 
 use crate::exchange_graph::ExchangeGraph;
 use anyhow::Result;
 use apply::Apply;
-use database::custom_sql_type::NaiveDateTime;
+use chrono::{Duration, NaiveDateTime};
 use database::diesel::QueryDsl;
 use database::diesel::*;
 use database::logic::Conn;
@@ -19,8 +18,6 @@ use rayon::prelude::*;
 use std::env;
 use std::ops::Deref;
 use std::rc::Rc;
-
-type Duration = <NaiveDateTime as Sub>::Output;
 
 pub fn api_balance_history(query: &QString) -> Result<JsonValue> {
     let (price_conn, balance_conn, _) = connect_db(&query)?;
