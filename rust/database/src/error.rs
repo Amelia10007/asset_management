@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum LogicError {
+    #[error("Cannot add not latest timestamp")]
+    NonLatestStamp,
     #[error("DuplicatedCurrency")]
     DuplicatedCurrency,
     #[error("DuplicatedMarket")]

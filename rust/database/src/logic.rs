@@ -97,6 +97,18 @@ pub fn add_currency(conn: &Conn, symbol: String, name: String) -> Result<Currenc
 }
 
 pub fn add_stamp(conn: &Conn, timestamp: NaiveDateTime) -> Result<Stamp> {
+    // Deny non latest timestamp.
+    // This system allow only to add newer data
+    let latest_stamp = stamp::table
+        .order(stamp::timestamp.desc())
+        .first::<Stamp>(conn)
+        .optional()?;
+    if let Some(latest_stamp) = latest_stamp {
+        if latest_stamp.timestamp >= timestamp {
+            return Err(LogicError::NonLatestStamp.into());
+        }
+    }
+
     let stamp_id = next_id::table.select(next_id::stamp).first(conn)?;
     let stamp = Stamp::new(stamp_id, timestamp);
 
