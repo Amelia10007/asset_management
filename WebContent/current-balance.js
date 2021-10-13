@@ -21,6 +21,8 @@ const renderBalances = (json) => {
         return;
     }
 
+    const hideSmallBalances = document.getElementById('hideSmallBalances').checked;
+
     const currentBalances = json['history'][0];
 
     const stamp = new Date(currentBalances['stamp']);
@@ -36,7 +38,9 @@ const renderBalances = (json) => {
         const pending = balance['pending'] * rate;
         const totalBalance = available + pending;
 
-        if (totalBalance > 0) {
+        // Hide 0 balance (and small balance under hide option is enabled)
+        const balanceThreshold = hideSmallBalances ? 0.1 : 0;
+        if (totalBalance > balanceThreshold) {
             labels.push(balance['symbol'] + '(' + balance['name'] + ')');
             totalBalances.push(totalBalance);
             totalBalanceSum += totalBalance;
